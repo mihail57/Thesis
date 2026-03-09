@@ -2,14 +2,14 @@
 #include "inference_context.h"
 
 struct Substitution {
-    std::map<std::string, std::shared_ptr<Type>> subs;
+    std::map<std::shared_ptr<TypeVar>, std::shared_ptr<Type>> subs;
 
     std::shared_ptr<Type> apply_to(const std::shared_ptr<Type>& to) const {
         if (subs.empty()) return to;
         
         std::shared_ptr<Type> result = to;
         for (const auto& pair : subs) {
-            auto target = std::make_shared<TypeVar>(pair.first);
+            auto target = pair.first;
             result = result->make_sub(target, pair.second);
         }
         return result;
@@ -43,20 +43,6 @@ struct Substitution {
         return new_ctx;
     }
 
-    void print() const {
-        if(subs.empty()) std::cout << "Identity substitution";
-        else {
-            std::cout << "Substitution: { ";
-            for (auto it = subs.begin(); it != subs.end(); ++it) {
-                if (it != subs.begin()) std::cout << ", ";
-                std::cout << it->first << " -> " << it->second->to_str();
-            }
-            std::cout << " }";
-        }
-        
-        std::cout << std::endl;
-    }
-
     Substitution operator+(const Substitution& other) const {
         Substitution result;
         
@@ -73,6 +59,10 @@ struct Substitution {
         }
         
         return result;
+    }    
+
+    static Substitution make_identity() {
+        return Substitution {};
     }
 };
 
@@ -81,14 +71,14 @@ bool occurs_check(const std::shared_ptr<TypeVar>& var, const std::shared_ptr<Typ
         return t_var->name == var->name;
     } else if (auto t_func = std::dynamic_pointer_cast<FuncType>(type)) {
         return occurs_check(var, t_func->arg_type) || occurs_check(var, t_func->ret_type);
+    } else if (auto t_cons = std::dynamic_pointer_cast<TypeConstructor>(type)) {
+        for(const auto& arg: t_cons->args) {
+            if(occurs_check(var, arg)) return true;
+        }
     }
     return false;
 }
 
 std::shared_ptr<Type> apply_substitutions(const Substitution& sub, std::shared_ptr<Type> type) {
     return sub.apply_to(type);
-}
-
-Substitution make_identity() {
-    return Substitution {};
 }

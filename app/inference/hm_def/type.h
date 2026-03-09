@@ -176,6 +176,8 @@ struct FuncType : Type, public std::enable_shared_from_this<FuncType> {
     };
 
     virtual std::string to_str() const {
+        if(auto arg_func = std::dynamic_pointer_cast<FuncType>(arg_type))
+            return "(" + arg_func->to_str() + ")->" + ret_type->to_str();
         return arg_type->to_str() + "->" + ret_type->to_str();
     }
 };

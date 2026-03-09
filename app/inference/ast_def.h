@@ -104,4 +104,44 @@ std::shared_ptr<AstNode> make_let_node(
     return std::shared_ptr<AstNode>(new LetNode(bind_var, bind_value, ret_value, loc));
 }
 
+
+struct BranchNode : AstNode { //if e1 then e2 else e3
+    std::shared_ptr<AstNode> cond_expr; //e1
+    std::shared_ptr<AstNode> true_expr; //e2
+    std::shared_ptr<AstNode> false_expr; //e3
+
+    virtual std::string to_str() const { return "if " + cond_expr->to_str() + " then " + true_expr->to_str() + " else " + false_expr->to_str(); }
+
+    BranchNode(const std::shared_ptr<AstNode>& cond, 
+            const std::shared_ptr<AstNode>& tr_e, 
+            const std::shared_ptr<AstNode>& f_e, 
+            const SourceLoc& loc)
+        : AstNode(loc), cond_expr(cond), true_expr(tr_e), false_expr(f_e)
+    {};
+};
+
+std::shared_ptr<AstNode> make_branch_node(
+    const std::shared_ptr<AstNode>& cond_expr, 
+    const std::shared_ptr<AstNode>& true_expr,
+    const std::shared_ptr<AstNode>& false_expr, 
+    const SourceLoc& loc) 
+{
+    return std::shared_ptr<AstNode>(new BranchNode(cond_expr, true_expr, false_expr, loc));
+}
+
+
+struct FixNode : AstNode { //fix e
+    std::shared_ptr<AstNode> func; //e
+
+    virtual std::string to_str() const { return "fix " + func->to_str(); }
+
+    FixNode(const std::shared_ptr<AstNode>& f, const SourceLoc& loc)
+        : AstNode(loc), func(f) {};
+};
+
+std::shared_ptr<AstNode> make_fix_node(const std::shared_ptr<AstNode>& func, const SourceLoc& loc) 
+{
+    return std::shared_ptr<AstNode>(new FixNode(func, loc));
+}
+
 #endif

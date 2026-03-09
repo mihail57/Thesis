@@ -3,7 +3,7 @@
 #include "../error.h"
 
 enum class TokenKind {
-    DATA, IDENTIFIER, LAMBDA, DOT, LET, EQUAL, IN, LPAREN, RPAREN, ERROR, EOF_T
+    DATA, IDENTIFIER, LAMBDA, DOT, LET, EQUAL, IN, IF, THEN, ELSE, FIX, LPAREN, RPAREN, ERROR, EOF_T
 };
 
 struct Token {
@@ -83,8 +83,12 @@ class TokenBuffer {
         id_ignore_case.resize(identifier.length());
         std::transform(identifier.begin(), identifier.end(), id_ignore_case.begin(), tolower);
 
+        if(id_ignore_case == "if") return Token(TokenKind::IF, identifier, loc);
+        if(id_ignore_case == "then") return Token(TokenKind::THEN, identifier, loc);
+        if(id_ignore_case == "else") return Token(TokenKind::ELSE, identifier, loc);
         if(id_ignore_case == "let") return Token(TokenKind::LET, identifier, loc);
         if(id_ignore_case == "in") return Token(TokenKind::IN, identifier, loc);
+        if(id_ignore_case == "fix") return Token(TokenKind::FIX, identifier, loc);
         
         return Token(TokenKind::IDENTIFIER, identifier, loc);
     }
@@ -193,11 +197,12 @@ public:
 
 
 /*
-expr = let | lambda | app | term
+expr = let | if_else | lambda | app | term
 let = LET var EQUAL expr IN expr
+if_else = IF expr THEN expr ELSE expr
 lambda = LAMBDA var DOT expr
 app = app term
-term = const | var | LPAREN expr RPAREN
+term = const | var | LPAREN expr RPAREN | FIX expr
 const = DATA
 var = IDENTIFIER
 */
@@ -217,6 +222,7 @@ NodeOrError parse_term(TokenBuffer& buffer);
 NodeOrError parse_var(TokenBuffer& buffer);
 NodeOrError parse_lambda(TokenBuffer& buffer);
 NodeOrError parse_let(TokenBuffer& buffer);
+NodeOrError parse_if_else(TokenBuffer& buffer);
 
 NodeOrError parse(const std::string& source) {
     TokenBuffer lexer(source);
@@ -237,6 +243,8 @@ NodeOrError parse_expr(TokenBuffer& buffer) {
     {
         case TokenKind::LET:
             return parse_let(buffer);
+        case TokenKind::IF:
+            return parse_if_else(buffer);
         case TokenKind::LAMBDA:
             return parse_lambda(buffer);
         default:
@@ -288,6 +296,17 @@ NodeOrError parse_term(TokenBuffer& buffer) {
             buffer.pop();
             result_uw->loc = lparen_loc + result_uw->loc + rparen_loc;
             return result_uw;
+        }
+        case TokenKind::FIX:
+        {
+            auto loc = buffer.front().loc;
+            buffer.pop();
+            auto fix_expr = parse_expr(buffer);
+            if(is_error(fix_expr)) {
+                return fix_expr;
+            }
+            auto fix_expr_uw = unwrap(fix_expr);
+            return make_fix_node(fix_expr_uw, loc + fix_expr_uw->loc);
         }
         default:
             return TypingError{.text = "Syntax error: unexpected token", .at = buffer.front().loc};
@@ -364,4 +383,38 @@ NodeOrError parse_let(TokenBuffer& buffer) {
     loc += unwrap(ret_expr)->loc;
 
     return make_let_node(std::dynamic_pointer_cast<VarNode>(unwrap(var)), unwrap(bind_expr), unwrap(ret_expr), loc);
+}
+
+NodeOrError parse_if_else(TokenBuffer& buffer) {
+    if(!expect(buffer, TokenKind::IF))
+        return TypingError{.text = "Syntax error: expected if", .at = buffer.front().loc};
+    auto loc = buffer.front().loc;
+    buffer.pop();
+
+    auto cond = parse_expr(buffer);
+    if(is_error(cond))
+        return cond;
+    loc += unwrap(cond)->loc;
+    
+    if(!expect(buffer, TokenKind::THEN))
+        return TypingError{.text = "Syntax error: expected then", .at = buffer.front().loc};
+    loc += buffer.front().loc;
+    buffer.pop();
+
+    auto true_expr = parse_expr(buffer);
+    if(is_error(true_expr))
+        return true_expr;
+    loc += unwrap(true_expr)->loc;
+
+    if(!expect(buffer, TokenKind::ELSE))
+        return TypingError{.text = "Syntax error: expected else", .at = buffer.front().loc};
+    loc += buffer.front().loc;
+    buffer.pop();
+
+    auto false_expr = parse_expr(buffer);
+    if(is_error(false_expr))
+        return false_expr;
+    loc += unwrap(false_expr)->loc;
+
+    return make_branch_node(unwrap(cond), unwrap(true_expr), unwrap(false_expr), loc);
 }
