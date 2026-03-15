@@ -66,7 +66,7 @@ struct Substitution {
     }
 };
 
-bool occurs_check(const std::shared_ptr<TypeVar>& var, const std::shared_ptr<Type>& type) {
+static bool occurs_check(const std::shared_ptr<TypeVar>& var, const std::shared_ptr<Type>& type) {
     if (auto t_var = std::dynamic_pointer_cast<TypeVar>(type)) {
         return t_var->name == var->name;
     } else if (auto t_func = std::dynamic_pointer_cast<FuncType>(type)) {
@@ -77,8 +77,4 @@ bool occurs_check(const std::shared_ptr<TypeVar>& var, const std::shared_ptr<Typ
         }
     }
     return false;
-}
-
-std::shared_ptr<Type> apply_substitutions(const Substitution& sub, std::shared_ptr<Type> type) {
-    return sub.apply_to(type);
 }
