@@ -1,6 +1,8 @@
 
 #include "lambda_parser.h"
 
+#include <algorithm>
+
 enum class TokenKind {
     DATA, IDENTIFIER, LAMBDA, DOT, LET, EQUAL, IN, IF, THEN, ELSE, FIX, LPAREN, RPAREN, ERROR, EOF_T
 };
@@ -8,11 +10,11 @@ enum class TokenKind {
 struct Token {
     TokenKind kind;
     SourceLoc loc;
-    std::shared_ptr<Type> type; // Только для констант
+    std::string type; // Только для констант
     std::string_view data;
 
-    Token(TokenKind kind, std::string_view data, const SourceLoc& loc) : Token(kind, nullptr, data, loc) {};
-    Token(TokenKind kind, std::shared_ptr<Type> type, std::string_view data, const SourceLoc& loc) : kind(kind), data(data), type(type), loc(loc) {};
+    Token(TokenKind kind, std::string_view data, const SourceLoc& loc) : Token(kind, "", data, loc) {};
+    Token(TokenKind kind, std::string type, std::string_view data, const SourceLoc& loc) : kind(kind), data(data), type(type), loc(loc) {};
 };
 
 
@@ -114,7 +116,7 @@ class TokenBuffer {
 
         pos++;
         
-        return Token(TokenKind::DATA, make_const_type("Str"), text, loc);
+        return Token(TokenKind::DATA, "Str", text, loc);
     }
 
     Token next_num() {
@@ -133,7 +135,7 @@ class TokenBuffer {
         
         auto num = data.substr(start, pos - start);
         
-        return Token(TokenKind::DATA, make_const_type("Int"), num, loc);
+        return Token(TokenKind::DATA, "Int", num, loc);
     }
 
     Token next_op() {

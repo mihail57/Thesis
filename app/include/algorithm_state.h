@@ -4,6 +4,7 @@
 
 #include <vector>
 #include <string>
+#include "ast_def.h"
 
 struct InferenceContextData {
     // Пары переменная - значение
@@ -12,11 +13,12 @@ struct InferenceContextData {
 
 struct AlgorithmStep {
     std::string data;
-    InferenceContextData inf_ctx;
+    std::shared_ptr<AstNode> at;
 };
 
 struct AlgorithmState {
     std::vector<AlgorithmStep> steps;
+    InferenceContextData ctx;
 };
 
 #endif

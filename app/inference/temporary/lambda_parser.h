@@ -2,8 +2,9 @@
 #ifndef LAMBDA_PARSER_H
 #define LAMBDA_PARSER_H
 
-#include "../ast_def.h"
+#include "ast_def.h"
 #include "../error.h"
+#include <variant>
 
 using NodeOrError = std::variant<std::shared_ptr<AstNode>, TypingError>;
 

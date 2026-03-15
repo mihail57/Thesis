@@ -10,7 +10,7 @@ struct AppInternal
     CommandDispatcher dispatcher;
 
     AppInternal(EventBuffer& event_buf) 
-        : dispatcher(build_dispatcher(event_buf)) {}
+        : inf_mgr(), dispatcher(build_dispatcher(event_buf)) {}
 
 private:
     CommandDispatcher build_dispatcher(EventBuffer& event_buf) {
@@ -34,11 +34,15 @@ void App::execute_commands() {
 
 AppState App::get_app_state() const { return app_state; }
 
-std::tuple<bool, std::string> App::run_with_properties(std::string input, InputType input_type, AlgorithmKind algorithm) {
-    auto inf_mgr = internal->inf_mgr;
+void App::set_default_properties(std::string input, InputType input_type, AlgorithmKind algorithm) {
+    auto& inf_mgr = internal->inf_mgr;
     inf_mgr.change_algorithm(algorithm);
     inf_mgr.change_input_type(input_type);
     inf_mgr.change_input(input);
+}
+
+std::tuple<bool, std::string> App::run_algorithm() {
+    auto& inf_mgr = internal->inf_mgr;
     auto ok = inf_mgr.run_algorithm(false);
     auto result = inf_mgr.state.result;
     inf_mgr.change_input("");

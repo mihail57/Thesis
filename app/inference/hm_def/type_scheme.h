@@ -3,9 +3,11 @@
 #define TYPE_SCHEME_H
 
 #include "type.h"
+#include <sstream>
 
 struct TypeScheme {
     virtual std::shared_ptr<Type> instantiate() const = 0;
+    virtual std::string to_str() const = 0;
     virtual ~TypeScheme() {};
 };
 
@@ -24,6 +26,16 @@ struct PolyTypeScheme : TypeScheme {
         return std::shared_ptr<Type>(new_type_body);
     }
 
+    virtual std::string to_str() const {
+        std::ostringstream ss;
+        if(binded_type_vars.size() > 0) {
+            for(const auto& binded: binded_type_vars) ss << "∀" << binded->to_str(false);
+            ss << ". ";
+        }
+        ss << type_body->to_str(false);
+        return ss.str();
+    }
+
     ~PolyTypeScheme() {};
 };
 
@@ -36,6 +48,11 @@ struct MonoTypeScheme : TypeScheme {
     virtual std::shared_ptr<Type> instantiate() const {
         return type;
     }
+
+    virtual std::string to_str() const {
+        return type->to_str(false);
+    }
+
     ~MonoTypeScheme() {};
 };
 

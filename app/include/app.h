@@ -15,7 +15,8 @@ public:
     App(CommandBuffer& cmd_buf, EventBuffer& event_buf);
     ~App();
 
-    std::tuple<bool, std::string> run_with_properties(std::string input, InputType input_type, AlgorithmKind algorithm);
+    void set_default_properties(std::string input, InputType input_type, AlgorithmKind algorithm);
+    std::tuple<bool, std::string> run_algorithm();
     void execute_commands();
     AppState get_app_state() const;
 };

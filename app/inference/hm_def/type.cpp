@@ -22,9 +22,9 @@ std::string TypeStringifier::get_name(const std::string& orig_name) {
     return new_name;
 }
 
-std::string Type::to_str() const {
+std::string Type::to_str(bool pretty_print) const {
     TypeStringifier ctx;
-    return to_str_impl(ctx);
+    return to_str_impl(ctx, pretty_print);
 }
 
 ConstType::ConstType(const std::string& n) : Type(), name(n) {};
@@ -41,7 +41,7 @@ std::shared_ptr<Type> ConstType::make_sub(const std::shared_ptr<TypeVar>& target
 
 void ConstType::get_vars(std::vector<std::shared_ptr<TypeVar>>& type_vars) {};
 
-std::string ConstType::to_str_impl(TypeStringifier& ctx) const {
+std::string ConstType::to_str_impl(TypeStringifier& ctx, bool pretty_print) const {
     return name;
 }
 
@@ -83,8 +83,8 @@ void TypeVar::get_vars(std::vector<std::shared_ptr<TypeVar>>& type_vars) {
     }
 };
 
-std::string TypeVar::to_str_impl(TypeStringifier& ctx) const {
-    if(generated) return ctx.get_name(name);
+std::string TypeVar::to_str_impl(TypeStringifier& ctx, bool pretty_print) const {
+    if(pretty_print && generated) return ctx.get_name(name);
     return name;
 }
 
@@ -135,14 +135,14 @@ void FuncType::get_vars(std::vector<std::shared_ptr<TypeVar>>& type_vars) {
     ret_type->get_vars(type_vars);
 };
 
-std::string FuncType::to_str_impl(TypeStringifier& ctx) const {
+std::string FuncType::to_str_impl(TypeStringifier& ctx, bool pretty_print) const {
     std::string arg_str;
     if(auto arg_func = std::dynamic_pointer_cast<FuncType>(arg_type)) {
-        arg_str = "(" + arg_func->to_str_impl(ctx) + ")";
+        arg_str = "(" + arg_func->to_str_impl(ctx, pretty_print) + ")";
     } else {
-        arg_str = arg_type->to_str_impl(ctx);
+        arg_str = arg_type->to_str_impl(ctx, pretty_print);
     }
-    std::string ret_str = ret_type->to_str_impl(ctx);
+    std::string ret_str = ret_type->to_str_impl(ctx, pretty_print);
     return arg_str + "->" + ret_str;
 }
 
@@ -204,12 +204,12 @@ void TypeConstructor::get_vars(std::vector<std::shared_ptr<TypeVar>>& type_vars)
         arg->get_vars(type_vars);
 };
 
-std::string TypeConstructor::to_str_impl(TypeStringifier& ctx) const {
-    std::string res = name->to_str_impl(ctx) + "(";
+std::string TypeConstructor::to_str_impl(TypeStringifier& ctx, bool pretty_print) const {
+    std::string res = name->to_str_impl(ctx, pretty_print) + "(";
     if (!args.empty()) {
-        res += args[0]->to_str_impl(ctx);
+        res += args[0]->to_str_impl(ctx, pretty_print);
         for(size_t i = 1; i < args.size(); i++) {
-            res += ", " + args[i]->to_str_impl(ctx);
+            res += ", " + args[i]->to_str_impl(ctx, pretty_print);
         }
     }
     res += ")";
