@@ -354,25 +354,19 @@ static float ComputeInitialFontSize(GLFWwindow* window) {
     if (window != nullptr)
         glfwGetWindowSize(window, &window_w, &window_h);
 
-    float scale_x = 1.0f;
-    float scale_y = 1.0f;
-    if (window != nullptr)
-        glfwGetWindowContentScale(window, &scale_x, &scale_y);
-
-    const float physical_h = static_cast<float>(window_h) * scale_y;
+    const float physical_h = static_cast<float>(window_h);
     const float base_size = physical_h / 50.0f; // 800px physical height -> 16px font
     return std::clamp(base_size, 13.0f, 28.0f);
 }
 
 static std::optional<std::string> GetEnvironmentVariableValue(const char* name) {
 #if defined(_WIN32)
-    char* buffer = nullptr;
-    size_t size = 0;
-    if (_dupenv_s(&buffer, &size, name) != 0 || buffer == nullptr)
+    DWORD size = GetEnvironmentVariableA(name, nullptr, 0);
+    if (size == 0)
         return std::nullopt;
 
-    std::string value(buffer);
-    std::free(buffer);
+    std::string value(size - 1, '\0');
+    GetEnvironmentVariableA(name, &value[0], size);
     return value;
 #else
     const size_t name_len = std::strlen(name);

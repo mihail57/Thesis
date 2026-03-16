@@ -83,11 +83,10 @@ int BuildAstVisualTree(const std::shared_ptr<AstNode>& node, std::vector<AstVisu
 
 	if (!node) {
 		visual_node.title = "Null";
-		visual_node.details.push_back("empty");
 		visual_node.fill_color = IM_COL32(70, 46, 46, 240);
 		visual_node.border_color = IM_COL32(180, 90, 90, 255);
 	} else if (auto const_node = std::dynamic_pointer_cast<ConstNode>(node)) {
-		visual_node.title = "Const";
+		visual_node.title = "Con";
 		visual_node.details.push_back(const_node->value + ": " + const_node->type);
 		visual_node.fill_color = IM_COL32(45, 63, 56, 240);
 		visual_node.border_color = IM_COL32(90, 190, 150, 255);
@@ -97,38 +96,30 @@ int BuildAstVisualTree(const std::shared_ptr<AstNode>& node, std::vector<AstVisu
 		visual_node.fill_color = IM_COL32(49, 57, 71, 240);
 		visual_node.border_color = IM_COL32(113, 151, 214, 255);
 	} else if (auto func_node = std::dynamic_pointer_cast<FuncNode>(node)) {
-		visual_node.title = "Lambda";
-		visual_node.details.push_back("param");
-		visual_node.details.push_back("body");
-		visual_node.edge_labels = {"param", "body"};
+		visual_node.title = "Abs";
+		visual_node.edge_labels = {"Параметр", "Тело"};
 		visual_node.fill_color = IM_COL32(63, 53, 79, 240);
 		visual_node.border_color = IM_COL32(171, 136, 232, 255);
 		child_nodes.push_back(func_node->param);
 		child_nodes.push_back(func_node->body);
 	} else if (auto app_node = std::dynamic_pointer_cast<AppNode>(node)) {
-		visual_node.title = "Apply";
-		visual_node.details.push_back("func");
-		visual_node.details.push_back("arg");
-		visual_node.edge_labels = {"func", "arg"};
+		visual_node.title = "App";
+		visual_node.edge_labels = {"Лямбда", "Аргумент"};
 		visual_node.fill_color = IM_COL32(66, 58, 44, 240);
 		visual_node.border_color = IM_COL32(210, 168, 90, 255);
 		child_nodes.push_back(app_node->func);
 		child_nodes.push_back(app_node->arg);
 	} else if (auto let_node = std::dynamic_pointer_cast<LetNode>(node)) {
 		visual_node.title = "Let";
-		visual_node.details.push_back("bind");
-		visual_node.details.push_back("in");
-		visual_node.edge_labels = {"bind_var", "bind_value", "ret_value"};
+		visual_node.edge_labels = {"Переменная", "Значение", "В выражении"};
 		visual_node.fill_color = IM_COL32(52, 63, 45, 240);
 		visual_node.border_color = IM_COL32(134, 201, 110, 255);
 		child_nodes.push_back(let_node->bind_var);
 		child_nodes.push_back(let_node->bind_value);
 		child_nodes.push_back(let_node->ret_value);
 	} else if (auto branch_node = std::dynamic_pointer_cast<BranchNode>(node)) {
-		visual_node.title = "If";
-		visual_node.details.push_back("cond");
-		visual_node.details.push_back("then/else");
-		visual_node.edge_labels = {"cond", "then", "else"};
+		visual_node.title = "Branch";
+		visual_node.edge_labels = {"Условие", "Если истинно", "Если ложно"};
 		visual_node.fill_color = IM_COL32(60, 49, 41, 240);
 		visual_node.border_color = IM_COL32(220, 135, 95, 255);
 		child_nodes.push_back(branch_node->cond_expr);
@@ -136,14 +127,12 @@ int BuildAstVisualTree(const std::shared_ptr<AstNode>& node, std::vector<AstVisu
 		child_nodes.push_back(branch_node->false_expr);
 	} else if (auto fix_node = std::dynamic_pointer_cast<FixNode>(node)) {
 		visual_node.title = "Fix";
-		visual_node.details.push_back("func");
-		visual_node.edge_labels = {"func"};
+		visual_node.edge_labels = {"Лямбда"};
 		visual_node.fill_color = IM_COL32(56, 48, 66, 240);
 		visual_node.border_color = IM_COL32(198, 133, 233, 255);
 		child_nodes.push_back(fix_node->func);
 	} else {
-		visual_node.title = "Unknown";
-		visual_node.details.push_back("unsupported node type");
+		visual_node.title = "Неизвестный узел";
 		visual_node.fill_color = IM_COL32(67, 56, 56, 240);
 		visual_node.border_color = IM_COL32(210, 120, 120, 255);
 	}
@@ -424,7 +413,7 @@ void DrawAstGraph(MainWindowState& main_window, const std::shared_ptr<AstNode>& 
 				const std::string& edge_label = parent.edge_labels[edge_i];
 				const ImVec2 label_size = ImGui::CalcTextSize(edge_label.c_str());
 				const ImVec2 label_pos = ImVec2(
-					(parent_bottom.x + child_top.x) * 0.5f - label_size.x * 0.5f,
+					child_top.x - label_size.x * 0.5f,
 					mid_y - label_size.y - 3.0f
 				);
 				draw_list->AddText(label_pos, IM_COL32(155, 165, 185, 255), edge_label.c_str());
@@ -473,7 +462,7 @@ void DrawAstGraph(MainWindowState& main_window, const std::shared_ptr<AstNode>& 
 		ClearSourceHighlight(main_window);
 	}
 
-	if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) && !ImGui::GetIO().KeyCtrl && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+	if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem | ImGuiHoveredFlags_AnyWindow) && !ImGui::GetIO().KeyCtrl && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
 		const float min_visible = 24.0f;
 		const float min_scroll_x = std::max(0.0f, graph_origin_x - view_size.x + min_visible);
 		const float max_scroll_x = std::min(ImGui::GetScrollMaxX(), graph_origin_x + graph_width - min_visible);

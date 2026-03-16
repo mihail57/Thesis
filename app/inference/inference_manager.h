@@ -38,6 +38,8 @@ private:
 
     void reset();
 
+    void add_algorithm_step(const std::string& step_text, const std::shared_ptr<AstNode>& at);
+
     SubstitutionOrError MGU(const std::shared_ptr<Type>& first, const std::shared_ptr<Type>& second);
 
     ResultOrError W(TypingContext& gamma, std::shared_ptr<ConstNode> node);

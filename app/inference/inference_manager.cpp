@@ -92,6 +92,14 @@ void InferenceManager::reset() {
     state.input_parsed.reset();
 }
 
+void InferenceManager::add_algorithm_step(const std::string& step_text, const std::shared_ptr<AstNode>& at) {
+    if(!detailed) return;
+    state.alg_state.steps.push_back(AlgorithmStep{
+        .data = step_text,
+        .at = at
+    });
+}
+
 SubstitutionOrError InferenceManager::MGU(const std::shared_ptr<Type>& first, const std::shared_ptr<Type>& second) {
     TypeStringifier ctx;
     if (auto f_var = std::dynamic_pointer_cast<TypeVar>(first)) {
@@ -171,10 +179,10 @@ ResultOrError InferenceManager::W(
     TypingContext& gamma,
     std::shared_ptr<ConstNode> node
 ) {
-    state.alg_state.steps.push_back(AlgorithmStep{
-        .data = std::format("Тип константного выражения {}: {}", node->value, node->type),
-        .at = node
-    });
+    add_algorithm_step(
+        std::format("Тип константного выражения {}: {}", node->value, node->type),
+        node
+    );
 
     return Result{ make_const_type(node->type), Substitution::make_identity() };
 }
@@ -185,10 +193,10 @@ ResultOrError InferenceManager::W(
 ) {
     auto sub = Substitution::make_identity();
     if(!gamma.has(node->var)) {
-        state.alg_state.steps.push_back(AlgorithmStep{
-            .data = std::format("Переменная {} отсутствует в контексте, завершаем алгоритм с ошибкой", node->var),
-            .at = node
-        });
+        add_algorithm_step(
+            std::format("Переменная {} отсутствует в контексте, завершаем алгоритм с ошибкой", node->var),
+            node
+        );
 
         return TypingError{.text = "неизвестная типовая переменная " + node->var, .at = node->loc};
     }
@@ -196,10 +204,10 @@ ResultOrError InferenceManager::W(
     std::shared_ptr<TypeScheme> scheme = gamma.get(node->var).second;
     auto inst = scheme->instantiate();
     
-    state.alg_state.steps.push_back(AlgorithmStep{
-        .data = std::format("Получаем схему типа переменной {} из контекста: {}\n\nПолучаем экземпляр этой схемы: {}", node->var, scheme->to_str(), inst->to_str(false)),
-        .at = node
-    });
+    add_algorithm_step(
+        std::format("Получаем схему типа переменной {} из контекста: {}\n\nПолучаем экземпляр этой схемы: {}", node->var, scheme->to_str(), inst->to_str(false)),
+        node
+    );
 
     return Result{ inst, sub };
 }
@@ -210,13 +218,24 @@ ResultOrError InferenceManager::W(
 ) {
     auto beta = TypeVar::generate_fresh();
     auto beta_upcasted = std::static_pointer_cast<Type>(beta);
+    auto beta_ts = std::shared_ptr<TypeScheme>(new PolyTypeScheme(
+        std::vector<std::shared_ptr<TypeVar>> { },
+        beta_upcasted
+    ));
     auto new_ctx = TypingContext(gamma).with(
         node->param->var,
-        std::shared_ptr<TypeScheme>(new PolyTypeScheme(
-            std::vector<std::shared_ptr<TypeVar>> { },
-            beta_upcasted
-        ))
+        beta_ts
     );
+    
+    add_algorithm_step(
+        std::format(
+            "Создаём свежую типовую переменную {}\n"
+            "Копируем контекст типизации, добавляем в неё связку {}: {}\n"
+            "Вызываем W с копией контекста на теле функции.",
+            beta->to_str(false), node->param->var, beta_ts->to_str()),
+        node
+    );
+
     auto res_1 = W(new_ctx, node->body);
 
     if(is_error(res_1)) {
@@ -229,21 +248,19 @@ ResultOrError InferenceManager::W(
     auto body_type = unwrap(t_1);
     auto result_type = std::shared_ptr<Type>(new FuncType(arg_type, body_type));
 
-    state.alg_state.steps.push_back(AlgorithmStep{
-        .data = std::format(
-            "Обработка λ-узла λ{}.body:\n"
-            "1) Вводим свежую типовую переменную {} для параметра.\n"
-            "2) Вычисляем тип тела в расширенном контексте: {}.\n"
-            "3) После применения накопленной подстановки к параметру получаем {}.\n"
-            "4) Формируем итоговый тип узла: {}.",
-            node->param->var,
+    add_algorithm_step(
+        std::format(
+            "Применяем полученную подстановку к свежей переменной {}:\n"
+            "Результат - {} (тип аргумента лямбды)\n"
+            "Тип тела функции (результат вложенного вызова W) - {}\n"
+            "Итоговый тип функции: {}.",
             beta->to_str(false),
-            body_type->to_str(false),
             arg_type->to_str(false),
+            body_type->to_str(false),
             result_type->to_str(false)
         ),
-        .at = node
-    });
+        node
+    );
 
     return Result{ result_type, s_1 };
 }
@@ -284,8 +301,8 @@ ResultOrError InferenceManager::W(
     auto s_3 = unwrap(res_3);
     auto result_type = s_3.apply_to(beta);
 
-    state.alg_state.steps.push_back(AlgorithmStep{
-        .data = std::format(
+    add_algorithm_step(
+        std::format(
             "Обработка применения (e1 e2):\n"
             "1) Тип функции e1: {}.\n"
             "2) Тип аргумента e2: {}.\n"
@@ -298,8 +315,8 @@ ResultOrError InferenceManager::W(
             beta->to_str(false),
             result_type->to_str(false)
         ),
-        .at = node
-    });
+        node
+    );
 
     return Result{ result_type, s_3 + s_2 + s_1 };
 }
@@ -308,6 +325,11 @@ ResultOrError InferenceManager::W(
     TypingContext& gamma,
     std::shared_ptr<LetNode> node
 ) {
+    add_algorithm_step(
+        "Вычислим тип и подстановку для значения привязки",
+        node
+    );
+
     auto res_1 = W(gamma, node->bind_value);
 
     if(is_error(res_1)) {
@@ -316,7 +338,24 @@ ResultOrError InferenceManager::W(
     auto [t_1, s_1] = unwrap(res_1);
 
     TypingContext new_ctx = s_1.apply_to(gamma);
-    new_ctx.set(node->bind_var->var, new_ctx.generalize(t_1));
+    auto t_1_gen = new_ctx.generalize(t_1);
+    new_ctx.set(node->bind_var->var, t_1_gen);
+    
+    add_algorithm_step(
+        std::format(
+            "Тип значения привязки T1: {}\n"
+            "Применяем полученную подстановку к контексту типизации\n"
+            "Обобщаем тип значения привязки относительно этого контекста.\n"
+            "Полученная схема типа: {}\n"
+            "Добавляем в контекст эту схему в связке с переменной {}\n"
+            "Вызываем W на новом контексте и возвращаемом значении let.",
+            t_1->to_str(false),
+            t_1_gen->to_str(),
+            node->bind_var->var
+        ),
+        node
+    );
+
     auto res_2 = W(new_ctx, node->ret_value);
 
     if(is_error(res_2)) {
@@ -325,22 +364,14 @@ ResultOrError InferenceManager::W(
 
     auto [t_2, s_2] = unwrap(res_2);
 
-    auto scheme = new_ctx.get(node->bind_var->var).second;
-    state.alg_state.steps.push_back(AlgorithmStep{
-        .data = std::format(
-            "Обработка let-узла let {} = e1 in e2:\n"
-            "1) Тип связываемого выражения e1: {}.\n"
-            "2) Обобщаем его в схему: {}.\n"
-            "3) Вычисляем тип выражения после in: {}.\n"
-            "4) Итоговый тип узла let: {}.",
-            node->bind_var->var,
-            t_1->to_str(false),
-            scheme->to_str(),
-            t_2->to_str(false),
+    add_algorithm_step(
+        std::format(
+            "Полученный тип возвращаемого значения T2: {}\n"
+            "В качестве подстановки возвращаем композицию S2 и S1.",
             t_2->to_str(false)
         ),
-        .at = node
-    });
+        node
+    );
 
     return Result{ t_2, s_2 + s_1 };
 }
@@ -389,8 +420,8 @@ ResultOrError InferenceManager::W(
     auto s_5 = unwrap(res_5);
 
     auto result_type = s_5.apply_to(t_3);
-    state.alg_state.steps.push_back(AlgorithmStep{
-        .data = std::format(
+    add_algorithm_step(
+        std::format(
             "Обработка ветвления if-then-else:\n"
             "1) Тип условия: {} (должен унифицироваться с Bool).\n"
             "2) Тип then-ветки: {}.\n"
@@ -401,8 +432,8 @@ ResultOrError InferenceManager::W(
             t_3->to_str(false),
             result_type->to_str(false)
         ),
-        .at = node
-    });
+        node
+    );
 
     return Result{ result_type, s_5 + s_4 + s_3 + s_2 + s_1 };
 }
@@ -428,8 +459,8 @@ ResultOrError InferenceManager::W(
     auto s_2 = unwrap(res_2);
 
     auto result_type = s_2.apply_to(beta);
-    state.alg_state.steps.push_back(AlgorithmStep{
-        .data = std::format(
+    add_algorithm_step(
+        std::format(
             "Обработка fix-узла:\n"
             "1) Тип внутреннего выражения: {}.\n"
             "2) Требуем форму {} -> {} и унифицируем.\n"
@@ -439,8 +470,8 @@ ResultOrError InferenceManager::W(
             beta->to_str(false),
             result_type->to_str(false)
         ),
-        .at = node
-    });
+        node
+    );
 
     return Result{ result_type, s_2 };
 }
@@ -481,8 +512,8 @@ SubstitutionOrError InferenceManager::M(
         return error;
     }
 
-    state.alg_state.steps.push_back(AlgorithmStep{
-        .data = std::format(
+    add_algorithm_step(
+        std::format(
             "M-алгоритм для константы {}:\n"
             "1) Ожидаемый тип: {}.\n"
             "2) Фактический тип константы: {}.\n"
@@ -491,8 +522,8 @@ SubstitutionOrError InferenceManager::M(
             expected->to_str(false),
             const_type->to_str(false)
         ),
-        .at = node
-    });
+        node
+    );
 
     return result;
 }
@@ -512,8 +543,8 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Va
         return error;
     }
 
-    state.alg_state.steps.push_back(AlgorithmStep{
-        .data = std::format(
+    add_algorithm_step(
+        std::format(
             "M-алгоритм для переменной {}:\n"
             "1) Ожидаемый тип: {}.\n"
             "2) Схема из контекста: {}.\n"
@@ -524,8 +555,8 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Va
             scheme->to_str(),
             inst->to_str(false)
         ),
-        .at = node
-    });
+        node
+    );
 
     return result;
 }
@@ -559,8 +590,8 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Fu
     auto s_2 = unwrap(result_2);
 
     auto result_sub = s_2 + s_1;
-    state.alg_state.steps.push_back(AlgorithmStep{
-        .data = std::format(
+    add_algorithm_step(
+        std::format(
             "M-алгоритм для λ-узла λ{}.body:\n"
             "1) Ожидаемый тип приводим к функциональному виду b1 -> b2.\n"
             "2) Параметру назначаем тип {}.\n"
@@ -570,8 +601,8 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Fu
             s_1_b_1->to_str(false),
             s_1_b_2->to_str(false)
         ),
-        .at = node
-    });
+        node
+    );
 
     return result_sub;
 }
@@ -592,8 +623,8 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Ap
         return result_2;
     auto s_2 = unwrap(result_2);
 
-    state.alg_state.steps.push_back(AlgorithmStep{
-        .data = std::format(
+    add_algorithm_step(
+        std::format(
             "M-алгоритм для применения (e1 e2):\n"
             "1) Для функции ожидаем тип {} -> {}.\n"
             "2) После первой подстановки проверяем аргумент с ожиданием {}.\n"
@@ -602,8 +633,8 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Ap
             expected->to_str(false),
             s_1_beta->to_str(false)
         ),
-        .at = node
-    });
+        node
+    );
 
     return s_2 + s_1;
 }
@@ -627,8 +658,8 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Le
         return result_2;
     auto s_2 = unwrap(result_2);
 
-    state.alg_state.steps.push_back(AlgorithmStep{
-        .data = std::format(
+    add_algorithm_step(
+        std::format(
             "M-алгоритм для let-узла let {} = e1 in e2:\n"
             "1) Проверяем e1 против свежего типа {}.\n"
             "2) Обобщаем полученный тип и расширяем контекст.\n"
@@ -638,8 +669,8 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Le
             beta->to_str(false),
             s_1_expected->to_str(false)
         ),
-        .at = node
-    });
+        node
+    );
 
     return s_2 + s_1;
 }
