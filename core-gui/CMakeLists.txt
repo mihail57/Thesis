@@ -9,6 +9,16 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/glfw/glfw.git
     GIT_TAG 7b6aead9fb88b3623e3b3725ebb42670cbe4c579 #3.4
 )
+
+if(UNIX AND NOT APPLE)
+    if(NOT DEFINED GLFW_BUILD_WAYLAND)
+        set(GLFW_BUILD_WAYLAND ON CACHE BOOL "Build GLFW Wayland backend" FORCE)
+    endif()
+    if(NOT DEFINED GLFW_BUILD_X11)
+        set(GLFW_BUILD_X11 ON CACHE BOOL "Build GLFW X11 backend" FORCE)
+    endif()
+endif()
+
 FetchContent_MakeAvailable(glfw3)
 
 FetchContent_Declare(

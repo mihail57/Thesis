@@ -524,11 +524,18 @@ Renderer::Renderer() {
     state = new RendererState();
 
     glfwSetErrorCallback(glfw_error_callback);
+#if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
+    // In WSLg/Wayland server-side decorations may be unavailable; X11 usually provides standard frame/buttons.
+    if (std::getenv("WSL_DISTRO_NAME") != nullptr || std::getenv("WSL_INTEROP") != nullptr) {
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+    }
+#endif
     if (!glfwInit())
         state = nullptr;
 
     // Create window with Vulkan context
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
     float main_scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor()); // Valid on GLFW 3.3+ only
     state->window = glfwCreateWindow((int)(1280 * main_scale), (int)(800 * main_scale), "Интерактивный вывод типов", nullptr, nullptr);
     if (!glfwVulkanSupported())
