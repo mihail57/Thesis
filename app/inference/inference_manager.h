@@ -5,11 +5,13 @@
 #include <tuple>
 #include <vector>
 #include <exception>
-#include <variant>
 
-#include "substitution_or_error.h"
-#include "type_or_error.h"
+#include "value_or_error.hpp"
 #include "temporary/lambda_parser.h"
+#include "hm_def/type.h"
+#include "hm_def/substitution.h"
+#include "hm_def/type_scheme.h"
+#include "hm_def/inference_context.h"
 
 #include "../include/inference_manager_state.h"
 
@@ -18,11 +20,9 @@ using Result = std::tuple<Type::base_ptr, Substitution>;
 
 Type::base_ptr get_type(const Result& v);
 
-using ResultOrError = std::variant<Result, TypingError>;
+using ResultOrError = ValueOrError<Result>;
 
-bool is_error(const ResultOrError& v);
-TypingError get_error(const ResultOrError& v);
-Result unwrap(const ResultOrError& v);
+using SubstitutionOrError = ValueOrError<Substitution>;
 
 
 struct InferenceManager {
@@ -62,7 +62,7 @@ private:
 
     std::string highlight_loc(const std::string& source, const SourceLoc& loc);
     TypingContext make_basic_context();
-    std::string print_error(const TypingError& error, const std::string& source);
+    std::string print_error(const Error& error, const std::string& source);
 };
 
 #endif

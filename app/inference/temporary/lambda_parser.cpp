@@ -209,11 +209,6 @@ var = IDENTIFIER
 */
 
 
-bool is_error(const NodeOrError& n) { return std::holds_alternative<TypingError>(n); }
-TypingError get_error(const NodeOrError& n) { return std::get<TypingError>(n); }
-std::shared_ptr<AstNode> unwrap(const NodeOrError& n) { return std::get<std::shared_ptr<AstNode>>(n); }
-
-
 bool expect(TokenBuffer& buffer, TokenKind t);
 NodeOrError parse_expr(TokenBuffer& buffer);
 NodeOrError parse_app_or_term(TokenBuffer& buffer);
@@ -227,11 +222,11 @@ NodeOrError parse(const std::string& source) {
     TokenBuffer lexer(source);
     auto result = parse_expr(lexer);
 
-    if(is_error(result))
+    if(result.is_error())
         return result;
     
     if(!expect(lexer, TokenKind::EOF_T))
-        return TypingError{.text = "Синтаксическая ошибка", .at = lexer.front().loc};
+        return Error{.text = "Синтаксическая ошибка", .at = lexer.front().loc};
 
     return result;
 }
@@ -258,18 +253,18 @@ bool term_like(TokenBuffer& buffer) {
 
 NodeOrError parse_app_or_term(TokenBuffer& buffer) {
     auto result = parse_term(buffer);
-    if(is_error(result))
+    if(result.is_error())
         return result;
-    auto loc = unwrap(result)->loc;
+    auto loc = result.unwrap()->loc;
 
     while (term_like(buffer))
     {
         auto right = parse_term(buffer);
-        if(is_error(right))
+        if(right.is_error())
             return right;
-        loc += unwrap(right)->loc;
+        loc += right.unwrap()->loc;
 
-        result = make_app_node(unwrap(result), unwrap(right), loc);
+        result = make_app_node(result.unwrap(), right.unwrap(), loc);
     }
     return result;
 }
@@ -289,8 +284,8 @@ NodeOrError parse_term(TokenBuffer& buffer) {
             buffer.pop();
             auto result = parse_expr(buffer);
             if(!expect(buffer, TokenKind::RPAREN))
-                return TypingError{.text = "Синтаксическая ошибка: ожидалось \')\'", .at = buffer.front().loc};
-            auto result_uw = unwrap(result);
+                return Error{.text = "Синтаксическая ошибка: ожидалось \')\'", .at = buffer.front().loc};
+            auto result_uw = result.unwrap();
             auto rparen_loc = buffer.front().loc;
             buffer.pop();
             result_uw->loc = lparen_loc + result_uw->loc + rparen_loc;
@@ -301,14 +296,14 @@ NodeOrError parse_term(TokenBuffer& buffer) {
             auto loc = buffer.front().loc;
             buffer.pop();
             auto fix_expr = parse_expr(buffer);
-            if(is_error(fix_expr)) {
+            if(fix_expr.is_error()) {
                 return fix_expr;
             }
-            auto fix_expr_uw = unwrap(fix_expr);
+            auto fix_expr_uw = fix_expr.unwrap();
             return make_fix_node(fix_expr_uw, loc + fix_expr_uw->loc);
         }
         default:
-            return TypingError{.text = "Синтаксическая ошибка: неожиданный токен", .at = buffer.front().loc};
+            return Error{.text = "Синтаксическая ошибка: неожиданный токен", .at = buffer.front().loc};
     }
 }
 
@@ -318,7 +313,7 @@ bool expect(TokenBuffer& buffer, TokenKind t) {
 
 NodeOrError parse_var(TokenBuffer& buffer) {
     if(!expect(buffer, TokenKind::IDENTIFIER))
-        return TypingError{.text = "Синтаксическая ошибка: ожидался идентификатор", .at = buffer.front().loc};
+        return Error{.text = "Синтаксическая ошибка: ожидался идентификатор", .at = buffer.front().loc};
 
     auto _var = buffer.front();
     auto var = make_var_node(std::string(_var.data), _var.loc);
@@ -328,92 +323,92 @@ NodeOrError parse_var(TokenBuffer& buffer) {
 
 NodeOrError parse_lambda(TokenBuffer& buffer) {
     if(!expect(buffer, TokenKind::LAMBDA))
-        return TypingError{.text = "Синтаксическая ошибка: ожидалось \'\\\'", .at = buffer.front().loc};
+        return Error{.text = "Синтаксическая ошибка: ожидалось \'\\\'", .at = buffer.front().loc};
     auto loc = buffer.front().loc;
     buffer.pop();
 
     auto var = parse_var(buffer);
-    if(is_error(var))
+    if(var.is_error())
         return var;
-    loc += unwrap(var)->loc;
+    loc += var.unwrap()->loc;
 
     if(!expect(buffer, TokenKind::DOT))
-        return TypingError{.text = "Синтаксическая ошибка: ожидалось \'.\'", .at = buffer.front().loc};
+        return Error{.text = "Синтаксическая ошибка: ожидалось \'.\'", .at = buffer.front().loc};
     loc += buffer.front().loc;
     buffer.pop();
 
     auto definition = parse_expr(buffer);
-    if(is_error(definition))
+    if(definition.is_error())
         return definition;
-    loc += unwrap(definition)->loc;
+    loc += definition.unwrap()->loc;
 
-    return make_func_node(std::dynamic_pointer_cast<VarNode>(unwrap(var)), unwrap(definition), loc);
+    return make_func_node(std::dynamic_pointer_cast<VarNode>(var.unwrap()), definition.unwrap(), loc);
 }
 
 NodeOrError parse_let(TokenBuffer& buffer) {
     if(!expect(buffer, TokenKind::LET))
-        return TypingError{.text = "Синтаксическая ошибка: ожидалось \'let\'", .at = buffer.front().loc};
+        return Error{.text = "Синтаксическая ошибка: ожидалось \'let\'", .at = buffer.front().loc};
     auto loc = buffer.front().loc;
     buffer.pop();
 
     auto var = parse_var(buffer);
-    if(is_error(var))
+    if(var.is_error())
         return var;
-    loc += unwrap(var)->loc;
+    loc += var.unwrap()->loc;
     
     if(!expect(buffer, TokenKind::EQUAL))
-        return TypingError{.text = "Синтаксическая ошибка: ожидалось \'=\'", .at = buffer.front().loc};
+        return Error{.text = "Синтаксическая ошибка: ожидалось \'=\'", .at = buffer.front().loc};
     loc += buffer.front().loc;
     buffer.pop();
 
     auto bind_expr = parse_expr(buffer);
-    if(is_error(bind_expr))
+    if(bind_expr.is_error())
         return bind_expr;
-    loc += unwrap(bind_expr)->loc;
+    loc += bind_expr.unwrap()->loc;
 
     if(!expect(buffer, TokenKind::IN))
-        return TypingError{.text = "Синтаксическая ошибка: ожидалось \'in\'", .at = buffer.front().loc};
+        return Error{.text = "Синтаксическая ошибка: ожидалось \'in\'", .at = buffer.front().loc};
     loc += buffer.front().loc;
     buffer.pop();
 
     auto ret_expr = parse_expr(buffer);
-    if(is_error(ret_expr))
+    if(ret_expr.is_error())
         return ret_expr;
-    loc += unwrap(ret_expr)->loc;
+    loc += ret_expr.unwrap()->loc;
 
-    return make_let_node(std::dynamic_pointer_cast<VarNode>(unwrap(var)), unwrap(bind_expr), unwrap(ret_expr), loc);
+    return make_let_node(std::dynamic_pointer_cast<VarNode>(var.unwrap()), bind_expr.unwrap(), ret_expr.unwrap(), loc);
 }
 
 NodeOrError parse_if_else(TokenBuffer& buffer) {
     if(!expect(buffer, TokenKind::IF))
-        return TypingError{.text = "Синтаксическая ошибка: ожидалось \'if\'", .at = buffer.front().loc};
+        return Error{.text = "Синтаксическая ошибка: ожидалось \'if\'", .at = buffer.front().loc};
     auto loc = buffer.front().loc;
     buffer.pop();
 
     auto cond = parse_expr(buffer);
-    if(is_error(cond))
+    if(cond.is_error())
         return cond;
-    loc += unwrap(cond)->loc;
+    loc += cond.unwrap()->loc;
     
     if(!expect(buffer, TokenKind::THEN))
-        return TypingError{.text = "Синтаксическая ошибка: ожидалось \'then\'", .at = buffer.front().loc};
+        return Error{.text = "Синтаксическая ошибка: ожидалось \'then\'", .at = buffer.front().loc};
     loc += buffer.front().loc;
     buffer.pop();
 
     auto true_expr = parse_expr(buffer);
-    if(is_error(true_expr))
+    if(true_expr.is_error())
         return true_expr;
-    loc += unwrap(true_expr)->loc;
+    loc += true_expr.unwrap()->loc;
 
     if(!expect(buffer, TokenKind::ELSE))
-        return TypingError{.text = "Синтаксическая ошибка: ожидалось \'else\'", .at = buffer.front().loc};
+        return Error{.text = "Синтаксическая ошибка: ожидалось \'else\'", .at = buffer.front().loc};
     loc += buffer.front().loc;
     buffer.pop();
 
     auto false_expr = parse_expr(buffer);
-    if(is_error(false_expr))
+    if(false_expr.is_error())
         return false_expr;
-    loc += unwrap(false_expr)->loc;
+    loc += false_expr.unwrap()->loc;
 
-    return make_branch_node(unwrap(cond), unwrap(true_expr), unwrap(false_expr), loc);
+    return make_branch_node(cond.unwrap(), true_expr.unwrap(), false_expr.unwrap(), loc);
 }

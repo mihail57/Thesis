@@ -29,7 +29,7 @@ struct Type {
     using base_ptr = std::shared_ptr<Type>;
 
     Type() {};
-    virtual ~Type() {};
+    virtual ~Type() = default;
 
     virtual std::shared_ptr<Type> clone() const = 0;
     virtual std::shared_ptr<Type> replace_vars(

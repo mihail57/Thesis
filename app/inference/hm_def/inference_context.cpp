@@ -1,5 +1,6 @@
 
 #include "inference_context.h"
+#include <unordered_set>
 
 
 bool TypingContext::has(const std::string& var) {
@@ -24,8 +25,7 @@ std::shared_ptr<TypeScheme> TypingContext::generalize(std::shared_ptr<Type>& typ
     std::vector<std::shared_ptr<TypeVar>> type_vars;
     type->get_vars(type_vars);
 
-    std::vector<std::shared_ptr<TypeVar>> ctx_free_vars;
-    ctx_free_vars.reserve(_context.size());
+    std::unordered_set<std::string> ctx_free_vars;
 
     for(const auto& ctx_pair: *this) {
         std::vector<std::shared_ptr<TypeVar>> ctx_term_fvs;
@@ -47,21 +47,14 @@ std::shared_ptr<TypeScheme> TypingContext::generalize(std::shared_ptr<Type>& typ
         }
         
         for(const auto& ctx_term_fv: ctx_term_fvs)
-            if(!std::any_of(
-                ctx_free_vars.cbegin(), ctx_free_vars.cend(),
-                [ctx_term_fv](const TypeVar::ptr& ctx_fv) { return ctx_term_fv->name == ctx_fv->name; }
-            ))
-                ctx_free_vars.push_back(ctx_term_fv);
+            ctx_free_vars.insert(ctx_term_fv->name);
     }
 
     std::vector<std::shared_ptr<TypeVar>> new_binded;
     new_binded.reserve(type_vars.size());
 
     for(const auto& tv : type_vars) {
-        if(!std::any_of(
-            ctx_free_vars.cbegin(), ctx_free_vars.cend(),
-            [tv](const TypeVar::ptr& s) { return s->name == tv->name; }
-        ))
+        if(ctx_free_vars.find(tv->name) != ctx_free_vars.end())
             new_binded.push_back(tv);
     }
 

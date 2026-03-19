@@ -56,7 +56,7 @@ std::shared_ptr<Type> TypeVar::clone() const { return std::make_shared<TypeVar>(
 std::shared_ptr<Type> TypeVar::replace_vars(const std::vector<std::shared_ptr<TypeVar>>& old_binded, std::vector<std::shared_ptr<TypeVar>>& new_binded) {
     auto val = std::find_if(old_binded.cbegin(), old_binded.cend(), [this](const std::shared_ptr<TypeVar>& o) { return o->name == this->name; });
     if(val == old_binded.end()) 
-        return std::make_shared<TypeVar>(*this); //Создание копии
+        return std::static_pointer_cast<Type>(shared_from_this()); //Создание копии
 
     auto& lookup = new_binded.at(std::distance(old_binded.cbegin(), val));
     if(!lookup) {
