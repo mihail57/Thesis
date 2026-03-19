@@ -1,15 +1,12 @@
 
 
+#include "inference_manager.h"
 #include "command_handler.h"
 
 #include <fmt/format.h>
 
 
 Type::base_ptr get_type(const Result& v) { return std::get<0>(v); }
-
-bool is_error(const ResultOrError& v) { return std::holds_alternative<TypingError>(v); }
-TypingError get_error(const ResultOrError& v) { return std::get<TypingError>(v); }
-Result unwrap(const ResultOrError& v) { return std::get<Result>(v); }
 
 
 bool InferenceManager::run_algorithm(bool detailed) {
@@ -29,25 +26,25 @@ bool InferenceManager::run_algorithm(bool detailed) {
         return false;
     }
     
-    if(is_error(parsed)) {
-        state.result = print_error(get_error(parsed), state.input);
+    if(parsed.is_error()) {
+        state.result = print_error(parsed.get_error(), state.input);
         return false;
     }
-    state.input_parsed = unwrap(parsed);
+    state.input_parsed = parsed.unwrap();
     
     switch (state.algorithm)
     {
     case AlgorithmKind::W:
     {
         auto result = W(tctx, state.input_parsed);
-        if(is_error(result)) {
+        if(result.is_error()) {
             std::ostringstream ss;
-            ss << "Ошибка при выводе типа: " << print_error(get_error(result), state.input);
+            ss << "Ошибка при выводе типа: " << print_error(result.get_error(), state.input);
 
             state.result = ss.str();
             return false;
         }
-        state.result = get_type(unwrap(result))->to_str();
+        state.result = get_type(result.unwrap())->to_str();
         
         break;
     }
@@ -55,14 +52,14 @@ bool InferenceManager::run_algorithm(bool detailed) {
     {
         auto type = TypeVar::generate_fresh();
         auto result = M(tctx, state.input_parsed, type);
-        if(is_error(result)) {
+        if(result.is_error()) {
             std::ostringstream ss;
-            ss << "Ошибка при выводе типа: " << print_error(std::get<TypingError>(result), state.input);
+            ss << "Ошибка при выводе типа: " << print_error(result.get_error(), state.input);
 
             state.result = ss.str();
             return false;
         }
-        state.result = unwrap(result).apply_to(type)->to_str();
+        state.result = result.unwrap().apply_to(type)->to_str();
         break;
     }
     default:
@@ -111,14 +108,14 @@ SubstitutionOrError InferenceManager::MGU(const std::shared_ptr<Type>& first, co
             }
         }
         if (occurs_check(f_var, second)) {
-            return TypingError{.text = "бесконечный тип с " + f_var->to_str_impl(ctx) + " и " + second->to_str_impl(ctx), .at = SourceLoc()};
+            return Error{.text = "бесконечный тип с " + f_var->to_str_impl(ctx) + " и " + second->to_str_impl(ctx), .at = SourceLoc()};
         }
         Substitution sub;
         sub.subs[f_var] = second;
         return sub;
     } else if (auto s_var = std::dynamic_pointer_cast<TypeVar>(second)) {
         if (occurs_check(s_var, first)) {
-            return TypingError{.text = "бесконечный тип с " + s_var->to_str_impl(ctx) + " и " + first->to_str_impl(ctx), .at = SourceLoc()};
+            return Error{.text = "бесконечный тип с " + s_var->to_str_impl(ctx) + " и " + first->to_str_impl(ctx), .at = SourceLoc()};
         }
         Substitution sub;
         sub.subs[s_var] = first;
@@ -129,30 +126,30 @@ SubstitutionOrError InferenceManager::MGU(const std::shared_ptr<Type>& first, co
                 return {};
             }
         }
-        return TypingError{.text = "несоответствие типов: " + first->to_str_impl(ctx) + " и " + second->to_str_impl(ctx), .at = SourceLoc()};
+        return Error{.text = "несоответствие типов: " + first->to_str_impl(ctx) + " и " + second->to_str_impl(ctx), .at = SourceLoc()};
     } else if (auto f_func = std::dynamic_pointer_cast<FuncType>(first)) {
         if (auto s_func = std::dynamic_pointer_cast<FuncType>(second)) {
             auto s1 = MGU(f_func->arg_type, s_func->arg_type);
-            if(is_error(s1)) {
-                auto error = std::get<TypingError>(s1);
+            if(s1.is_error()) {
+                auto error = s1.get_error();
                 error.text += "\nпри унификации " + f_func->to_str_impl(ctx) + " и " + s_func->to_str_impl(ctx);
                 return error;
             }
-            auto s1_uw = unwrap(s1);
+            auto s1_uw = s1.unwrap();
 
             auto new_f_ret = s1_uw.apply_to(f_func->ret_type);
             auto new_s_ret = s1_uw.apply_to(s_func->ret_type);
 
             auto s2 = MGU(new_f_ret, new_s_ret);            
-            if(is_error(s2)) {
-                auto error = std::get<TypingError>(s2);
+            if(s2.is_error()) {
+                auto error = s2.get_error();
                 error.text += "\nпри унификации " + f_func->to_str_impl(ctx) + " и " + s_func->to_str_impl(ctx);
                 return error;
             }
 
-            return unwrap(s2) + s1_uw;
+            return s2.unwrap() + s1_uw;
         }
-        return TypingError{.text = "несоответствие типов: " + first->to_str_impl(ctx) + " и " + second->to_str_impl(ctx), .at = SourceLoc()};
+        return Error{.text = "несоответствие типов: " + first->to_str_impl(ctx) + " и " + second->to_str_impl(ctx), .at = SourceLoc()};
     } else if(auto f_constructor = std::dynamic_pointer_cast<TypeConstructor>(first)) {
         if(auto s_constructor = std::dynamic_pointer_cast<TypeConstructor>(second)) {
             if(s_constructor->name->name == f_constructor->name->name 
@@ -161,20 +158,20 @@ SubstitutionOrError InferenceManager::MGU(const std::shared_ptr<Type>& first, co
                 Substitution s;
                 for(int i = 0; i < f_constructor->args.size(); i++) {
                     auto res = MGU(f_constructor->args[i], s_constructor->args[i]);
-                    if(is_error(res)) {
-                        auto error = std::get<TypingError>(res);
+                    if(res.is_error()) {
+                        auto error = res.get_error();
                         error.text += "\nпри унификации " + f_constructor->to_str_impl(ctx) + " и " + s_constructor->to_str_impl(ctx) + " (given and expected types of " + f_constructor->to_str_impl(ctx) + " )";
                         return error;
                     }
-                    s = s + unwrap(res);
+                    s = s + res.unwrap();
                 }
 
                 return s;
             }
         }
-        return TypingError{.text = "несоответствие типов: " + first->to_str_impl(ctx) + " и " + second->to_str_impl(ctx), .at = SourceLoc()};
+        return Error{.text = "несоответствие типов: " + first->to_str_impl(ctx) + " и " + second->to_str_impl(ctx), .at = SourceLoc()};
     }
-    return TypingError{.text = "неизвестный тип в MGU", .at = SourceLoc()};
+    return Error{.text = "неизвестный тип в MGU", .at = SourceLoc()};
 }
 
 ResultOrError InferenceManager::W(
@@ -200,7 +197,7 @@ ResultOrError InferenceManager::W(
             node
         );
 
-        return TypingError{.text = "неизвестная типовая переменная " + node->var, .at = node->loc};
+        return Error{.text = "неизвестная типовая переменная " + node->var, .at = node->loc};
     }
         
     std::shared_ptr<TypeScheme> scheme = gamma.get(node->var).second;
@@ -240,14 +237,14 @@ ResultOrError InferenceManager::W(
 
     auto res_1 = W(new_ctx, node->body);
 
-    if(is_error(res_1)) {
+    if(res_1.is_error()) {
         return res_1;
     }
 
-    auto [t_1, s_1] = unwrap(res_1);
+    auto [t_1, s_1] = res_1.unwrap();
 
     auto arg_type = s_1.apply_to(beta_upcasted);
-    auto body_type = unwrap(t_1);
+    auto body_type = t_1;
     auto result_type = std::shared_ptr<Type>(new FuncType(arg_type, body_type));
 
     add_algorithm_step(
@@ -273,34 +270,34 @@ ResultOrError InferenceManager::W(
 ) {
     auto res_1 = W(gamma, node->func);
 
-    if(is_error(res_1)) {
+    if(res_1.is_error()) {
         return res_1;
     }
 
-    auto [t_1, s_1] = unwrap(res_1);
+    auto [t_1, s_1] = res_1.unwrap();
 
     TypingContext new_ctx = s_1.apply_to(gamma);
     auto res_2 = W(new_ctx, node->arg);
 
-    if(is_error(res_2)) {
+    if(res_2.is_error()) {
         return res_2;
     }
 
-    auto [t_2, s_2] = unwrap(res_2);
+    auto [t_2, s_2] = res_2.unwrap();
 
     auto beta = TypeVar::generate_fresh();
     auto res_3 = MGU(
-        s_2.apply_to(unwrap(t_1)), 
-        make_func_type(unwrap(t_2), beta)
+        s_2.apply_to(t_1), 
+        make_func_type(t_2, beta)
     );
 
-    if(is_error(res_3)) {
-        auto error = std::get<TypingError>(res_3);
+    if(res_3.is_error()) {
+        auto error = res_3.get_error();
         error.at = node->loc;
         return error;
     }
 
-    auto s_3 = unwrap(res_3);
+    auto s_3 = res_3.unwrap();
     auto result_type = s_3.apply_to(beta);
 
     add_algorithm_step(
@@ -334,10 +331,10 @@ ResultOrError InferenceManager::W(
 
     auto res_1 = W(gamma, node->bind_value);
 
-    if(is_error(res_1)) {
+    if(res_1.is_error()) {
         return res_1;
     }
-    auto [t_1, s_1] = unwrap(res_1);
+    auto [t_1, s_1] = res_1.unwrap();
 
     TypingContext new_ctx = s_1.apply_to(gamma);
     auto t_1_gen = new_ctx.generalize(t_1);
@@ -360,11 +357,11 @@ ResultOrError InferenceManager::W(
 
     auto res_2 = W(new_ctx, node->ret_value);
 
-    if(is_error(res_2)) {
+    if(res_2.is_error()) {
         return res_2;
     }
 
-    auto [t_2, s_2] = unwrap(res_2);
+    auto [t_2, s_2] = res_2.unwrap();
 
     add_algorithm_step(
         fmt::format(
@@ -384,42 +381,42 @@ ResultOrError InferenceManager::W(
 ) {
     auto res_1 = W(gamma, node->cond_expr);
 
-    if(is_error(res_1)) {
+    if(res_1.is_error()) {
         return res_1;
     }
-    auto [t_1, s_1] = unwrap(res_1);
+    auto [t_1, s_1] = res_1.unwrap();
 
     auto res_2 = MGU(s_1.apply_to(t_1), make_const_type("Bool"));
-    if(is_error(res_2)) {
-        auto error = std::get<TypingError>(res_2);
+    if(res_2.is_error()) {
+        auto error = res_2.get_error();
         error.at = node->loc;
         return error;
     }
-    auto s_2 = unwrap(res_2);
+    auto s_2 = res_2.unwrap();
     auto s_2_1 = s_2 + s_1;
 
     TypingContext new_ctx = s_2_1.apply_to(gamma);
     auto res_3 = W(new_ctx, node->true_expr);
-    if(is_error(res_3)) {
+    if(res_3.is_error()) {
         return res_3;
     }
-    auto [t_2, s_3] = unwrap(res_3);
+    auto [t_2, s_3] = res_3.unwrap();
 
     auto s_3_2_1 = s_3 + s_2 + s_1;
     new_ctx = s_3_2_1.apply_to(gamma);
     auto res_4 = W(new_ctx, node->false_expr);
-    if(is_error(res_4)) {
+    if(res_4.is_error()) {
         return res_4;
     }
-    auto [t_3, s_4] = unwrap(res_4);
+    auto [t_3, s_4] = res_4.unwrap();
 
     auto res_5 = MGU(s_4.apply_to(t_2), t_3);
-    if(is_error(res_5)) {
-        auto error = std::get<TypingError>(res_5);
+    if(res_5.is_error()) {
+        auto error = res_5.get_error();
         error.at = node->loc;
         return error;
     }
-    auto s_5 = unwrap(res_5);
+    auto s_5 = res_5.unwrap();
 
     auto result_type = s_5.apply_to(t_3);
     add_algorithm_step(
@@ -446,19 +443,19 @@ ResultOrError InferenceManager::W(
 ) {
     auto res_1 = W(gamma, node->func);
 
-    if(is_error(res_1)) {
+    if(res_1.is_error()) {
         return res_1;
     }
-    auto [t_1, s_1] = unwrap(res_1);
+    auto [t_1, s_1] = res_1.unwrap();
 
     auto beta = TypeVar::generate_fresh();
     auto res_2 = MGU(s_1.apply_to(t_1), make_func_type(beta, beta));
-    if(is_error(res_2)) {
-        auto error = std::get<TypingError>(res_2);
+    if(res_2.is_error()) {
+        auto error = res_2.get_error();
         error.at = node->loc;
         return error;
     }
-    auto s_2 = unwrap(res_2);
+    auto s_2 = res_2.unwrap();
 
     auto result_type = s_2.apply_to(beta);
     add_algorithm_step(
@@ -497,7 +494,7 @@ ResultOrError InferenceManager::W(
     if(auto fix_node = std::dynamic_pointer_cast<FixNode>(node))
         return W(gamma, fix_node);
     
-    return TypingError{.text = "неизвестный тип узла АСД", .at = node->loc};
+    return Error{.text = "неизвестный тип узла АСД", .at = node->loc};
 }
 
 
@@ -508,8 +505,8 @@ SubstitutionOrError InferenceManager::M(
 ) {
     auto const_type = make_const_type(node->type);
     auto result = MGU(expected, const_type);
-    if(is_error(result)) {
-        auto error = std::get<TypingError>(result);
+    if(result.is_error()) {
+        auto error = result.get_error();
         error.at = node->loc;
         return error;
     }
@@ -532,15 +529,15 @@ SubstitutionOrError InferenceManager::M(
 
 SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<VarNode> node, Type::base_ptr expected) {
     if(!gamma.has(node->var)) {
-        return TypingError{.text = "неизвестная типовая переменная " + node->var, .at = node->loc};
+        return Error{.text = "неизвестная типовая переменная " + node->var, .at = node->loc};
     }
         
     std::shared_ptr<TypeScheme> scheme = gamma.get(node->var).second;
     auto inst = scheme->instantiate();
     auto result = MGU(expected, inst);
 
-    if(is_error(result)) {
-        auto error = std::get<TypingError>(result);
+    if(result.is_error()) {
+        auto error = result.get_error();
         error.at = node->loc;
         return error;
     }
@@ -568,12 +565,12 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Fu
     auto func_type = make_func_type(b_1, b_2);
     auto result_1 = MGU(expected, func_type);
 
-    if(is_error(result_1)) {
-        auto error = std::get<TypingError>(result_1);
+    if(result_1.is_error()) {
+        auto error = result_1.get_error();
         error.at = node->loc;
         return error;
     }
-    auto s_1 = unwrap(result_1);
+    auto s_1 = result_1.unwrap();
 
     auto s_1_b_1 = s_1.apply_to(b_1);
     auto new_ctx = s_1.apply_to(gamma).with(
@@ -586,10 +583,10 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Fu
     auto s_1_b_2 = s_1.apply_to(b_2);
     auto result_2 = M(new_ctx, node->body, s_1_b_2);
 
-    if(is_error(result_2)) {
+    if(result_2.is_error()) {
         return result_2;
     }
-    auto s_2 = unwrap(result_2);
+    auto s_2 = result_2.unwrap();
 
     auto result_sub = s_2 + s_1;
     add_algorithm_step(
@@ -613,17 +610,17 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Ap
     auto beta = TypeVar::generate_fresh();
     auto result_1 = M(gamma, node->func, make_func_type(beta, expected));
 
-    if(is_error(result_1))
+    if(result_1.is_error())
         return result_1;
-    auto s_1 = unwrap(result_1);
+    auto s_1 = result_1.unwrap();
 
     auto new_ctx = s_1.apply_to(gamma);
     auto s_1_beta = s_1.apply_to(beta);
     auto result_2 = M(new_ctx, node->arg, s_1_beta);
 
-    if(is_error(result_2))
+    if(result_2.is_error())
         return result_2;
-    auto s_2 = unwrap(result_2);
+    auto s_2 = result_2.unwrap();
 
     add_algorithm_step(
         fmt::format(
@@ -645,9 +642,9 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Le
     auto beta = TypeVar::generate_fresh();
     auto result_1 = M(gamma, node->bind_value, beta);
 
-    if(is_error(result_1))
+    if(result_1.is_error())
         return result_1;
-    auto s_1 = unwrap(result_1);
+    auto s_1 = result_1.unwrap();
 
     auto new_ctx = s_1.apply_to(gamma);
     auto s_t_1 = s_1.apply_to(beta);
@@ -656,9 +653,9 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Le
     auto s_1_expected = s_1.apply_to(expected);
     auto result_2 = M(new_ctx, node->ret_value, s_1_expected);
 
-    if(is_error(result_2))
+    if(result_2.is_error())
         return result_2;
-    auto s_2 = unwrap(result_2);
+    auto s_2 = result_2.unwrap();
 
     add_algorithm_step(
         fmt::format(
@@ -678,10 +675,10 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Le
 }
 
 SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<BranchNode> node, Type::base_ptr expected) {
-    return TypingError{.text = "Не имплементированно", .at = node->loc};
+    return Error{.text = "Не имплементированно", .at = node->loc};
 }
 SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<FixNode> node, Type::base_ptr expected) {    
-    return TypingError{.text = "Не имплементированно", .at = node->loc};
+    return Error{.text = "Не имплементированно", .at = node->loc};
 }
 
 SubstitutionOrError InferenceManager::M(
@@ -704,7 +701,7 @@ SubstitutionOrError InferenceManager::M(
     if(auto fix_node = std::dynamic_pointer_cast<FixNode>(node))
         return M(gamma, fix_node, expected);
     
-    return TypingError{.text = "неизвестный тип узла АСД", .at = node->loc};
+    return Error{.text = "неизвестный тип узла АСД", .at = node->loc};
 }
 
 
@@ -763,7 +760,7 @@ TypingContext InferenceManager::make_basic_context() {
     return tctx;
 }
 
-std::string InferenceManager::print_error(const TypingError& error, const std::string& source) {
+std::string InferenceManager::print_error(const Error& error, const std::string& source) {
     std::ostringstream ss;
     ss << error.text << std::endl;
     ss << highlight_loc(source, error.at) << std::endl;
