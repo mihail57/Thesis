@@ -2,43 +2,29 @@
 #ifndef MAIN_WINDOW_STATE_H
 #define MAIN_WINDOW_STATE_H
 
+#include "../expression_visualizer/state.h"
+#include "../step_visualizer/state.h"
 #include "app_state.h"
 #include <array>
+#include <optional>
 
 enum class MainInputMode {
 	Text,
 	File
 };
 
-struct MainTopPanelState {
-	MainInputMode input_mode = MainInputMode::Text;
-	std::array<char, 2048> text_input{};
-	std::array<char, 2048> ast_source_copy{};
-	std::array<char, 512> file_path{};
-
-	float ast_zoom = 1.0f;
-	int selected_ast_node = -1;
-	bool pending_source_highlight = false;
-	bool clear_source_selection_only = false;
-	int highlight_start = 0;
-	int highlight_end = 0;
-
-	bool right_panel_open = true;
-	float right_panel_width = 320.0f;
-};
-
-struct MainBottomPanelState {
-	float reserved_height = 180.0f;
-	const AstNode* hovered_step_node = nullptr;
-	int steps_ui_generation = 0;
-};
-
 struct MainWindowState
 {
-	MainTopPanelState top_panel;
-	MainBottomPanelState bottom_panel;
+	MainInputMode input_mode = MainInputMode::Text;
+	std::array<char, 2048> text_input{};
+	std::array<char, 512> file_path{};
 
-	InferenceManagerState inf_mgr_state;
+	InputType input_type;
+	AlgorithmKind algorithm;
+	std::optional<std::string_view> result = std::nullopt;
+
+	ExpressionVisualizerState expr_vis_state;
+	StepVisualizerState step_vis_state;
 
 	MainWindowState(const AppState& app_state);
 };
