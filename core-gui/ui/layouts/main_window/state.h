@@ -25,6 +25,8 @@ struct MainWindowState
 
 	ExpressionVisualizerState expr_vis_state;
 	StepVisualizerState step_vis_state;
+	
+	struct ImFont* monospace_font = nullptr;
 
 	MainWindowState(const AppState& app_state);
 };

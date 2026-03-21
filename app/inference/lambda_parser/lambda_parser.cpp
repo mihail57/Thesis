@@ -1,200 +1,9 @@
 
+#include "../ast_helpers.h"
+#include "token_buffer.h"
 #include "lambda_parser.h"
 
 #include <algorithm>
-
-enum class TokenKind {
-    DATA, IDENTIFIER, LAMBDA, DOT, LET, EQUAL, IN, IF, THEN, ELSE, FIX, LPAREN, RPAREN, ERROR, EOF_T
-};
-
-struct Token {
-    TokenKind kind;
-    SourceLoc loc;
-    std::string type; // Только для констант
-    std::string_view data;
-
-    Token(TokenKind kind, std::string_view data, const SourceLoc& loc) : Token(kind, "", data, loc) {};
-    Token(TokenKind kind, std::string type, std::string_view data, const SourceLoc& loc) : kind(kind), data(data), type(type), loc(loc) {};
-};
-
-
-/*
-
-*/
-
-class TokenBuffer {
-    std::string_view data;
-    int pos = 0; 
-    Token current;
-
-    enum class SymbolKind {
-        TEXT, NUM, QUOTE, LPAREN, RPAREN, INDENT, LAMBDA, DOT, EQUAL, OP_SYMBOL, ERROR
-    };
-
-    struct Symbol {
-        SymbolKind kind;
-        char data;
-
-        static SymbolKind from_char(char c) {
-            if(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_')
-                return SymbolKind::TEXT;
-            else if(c == ' ' || c == '\n' || c == '\r' || c == '\t')
-                return SymbolKind::INDENT;
-            else if(c >= '0' && c <= '9') return SymbolKind::NUM;
-            else if(c == '\\') return SymbolKind::LAMBDA;
-            else if(c == '.') return SymbolKind::DOT;
-            else if(c == '=') return SymbolKind::EQUAL;
-            else if(c == '(') return SymbolKind::LPAREN;
-            else if(c == ')') return SymbolKind::RPAREN;
-            else if(c == '"' || c == '\'') return SymbolKind::QUOTE;
-            else if(c == '[' || c == ']' || c == ':') return SymbolKind::OP_SYMBOL;
-            else return SymbolKind::ERROR;
-        }
-
-        Symbol() : Symbol('\0') {};
-        Symbol(char c) : data(c), kind(from_char(c)) {};
-    };
-
-    Symbol NextSymbol() {
-        return Symbol(data[pos]);
-    }
-
-    void SkipIndent() {
-        while (pos < data.size() && NextSymbol().kind == SymbolKind::INDENT)
-            pos++;
-    }
-
-    Token next_identifier() {
-        auto start = pos;
-
-        while (pos < data.size())
-        {
-            auto c = NextSymbol();
-            if(c.kind != SymbolKind::TEXT && c.kind != SymbolKind::NUM)
-                break;
-
-            pos++;
-        }
-
-        SourceLoc loc(start, pos);
-        
-        auto identifier = data.substr(start, pos - start);
-
-        std::string id_ignore_case;
-        id_ignore_case.resize(identifier.length());
-        std::transform(identifier.begin(), identifier.end(), id_ignore_case.begin(), tolower);
-
-        if(id_ignore_case == "if") return Token(TokenKind::IF, identifier, loc);
-        if(id_ignore_case == "then") return Token(TokenKind::THEN, identifier, loc);
-        if(id_ignore_case == "else") return Token(TokenKind::ELSE, identifier, loc);
-        if(id_ignore_case == "let") return Token(TokenKind::LET, identifier, loc);
-        if(id_ignore_case == "in") return Token(TokenKind::IN, identifier, loc);
-        if(id_ignore_case == "fix") return Token(TokenKind::FIX, identifier, loc);
-        
-        return Token(TokenKind::IDENTIFIER, identifier, loc);
-    }
-
-    Token next_quoted() {
-        auto start = pos++;
-        Symbol c;
-
-        while (pos < data.size())
-        {
-            c = NextSymbol();
-            if(c.kind == SymbolKind::QUOTE)
-                break;
-
-            pos++;
-        }
-
-        SourceLoc loc(start, pos + 1);
-        
-        auto text = data.substr(start + 1, pos - start - 1);
-
-        if(pos == data.size() && c.kind != SymbolKind::QUOTE)
-            return Token(TokenKind::ERROR, text, loc);
-
-        pos++;
-        
-        return Token(TokenKind::DATA, "Str", text, loc);
-    }
-
-    Token next_num() {
-        auto start = pos;
-
-        while (pos < data.size())
-        {
-            auto c = NextSymbol();
-            if(c.kind != SymbolKind::NUM)
-                break;
-
-            pos++;
-        }
-
-        SourceLoc loc(start, pos);
-        
-        auto num = data.substr(start, pos - start);
-        
-        return Token(TokenKind::DATA, "Int", num, loc);
-    }
-
-    Token next_op() {
-        auto start = pos;
-
-        while (pos < data.size())
-        {
-            auto c = NextSymbol();
-            if(c.kind != SymbolKind::OP_SYMBOL)
-                break;
-
-            pos++;
-        }
-
-        SourceLoc loc(start, pos);
-        
-        auto op = data.substr(start, pos - start);
-
-        if(op == "::") return Token(TokenKind::IDENTIFIER, op, loc);
-        if(op == "[]") return Token(TokenKind::IDENTIFIER, op, loc);
-        
-        return Token(TokenKind::ERROR, op, loc);
-    }
-
-    Token NextToken() {
-        SkipIndent();
-
-        if (pos >= data.size())
-            return Token(TokenKind::EOF_T, "", SourceLoc(data.size() - 1, data.size()));
-
-        auto c = NextSymbol();
-
-        switch (c.kind)
-        {
-            case SymbolKind::TEXT      : return next_identifier();
-            case SymbolKind::QUOTE     : return next_quoted();
-            case SymbolKind::NUM       : return next_num();
-            case SymbolKind::OP_SYMBOL : return next_op();
-            default: break;
-        }
-        
-        SourceLoc loc(pos, pos + 1);
-        pos++;
-        switch (c.kind) {
-            case SymbolKind::LAMBDA : return Token(TokenKind::LAMBDA, "λ", loc);
-            case SymbolKind::EQUAL  : return Token(TokenKind::EQUAL, "=", loc);
-            case SymbolKind::DOT    : return Token(TokenKind::DOT, ".", loc);
-            case SymbolKind::LPAREN : return Token(TokenKind::LPAREN, "(", loc);
-            case SymbolKind::RPAREN : return Token(TokenKind::RPAREN, ")", loc);
-            default: return Token(TokenKind::ERROR, c.data + "", loc);
-        }
-    }
-
-public:
-    TokenBuffer(const std::string& target) : data(target), pos(0), current(NextToken()) {};
-
-    const Token& front() { return current; }
-    void pop() { current = NextToken(); }
-};
 
 
 /*
@@ -264,7 +73,7 @@ NodeOrError parse_app_or_term(TokenBuffer& buffer) {
             return right;
         loc += right.unwrap()->loc;
 
-        result = make_app_node(result.unwrap(), right.unwrap(), loc);
+        result = upcast(make_app_node(result.unwrap(), right.unwrap(), loc));
     }
     return result;
 }
@@ -274,10 +83,10 @@ NodeOrError parse_term(TokenBuffer& buffer) {
     switch (head.kind) {    
         case TokenKind::DATA:
             buffer.pop();
-            return make_const_node(std::string(head.data), head.type, head.loc);
+            return upcast(make_const_node(std::string(head.data), head.type, head.loc));
         case TokenKind::IDENTIFIER:
             buffer.pop();
-            return make_var_node(std::string(head.data), head.loc);
+            return upcast(make_var_node(std::string(head.data), head.loc));
         case TokenKind::LPAREN:
         {
             auto lparen_loc = buffer.front().loc;
@@ -300,7 +109,7 @@ NodeOrError parse_term(TokenBuffer& buffer) {
                 return fix_expr;
             }
             auto fix_expr_uw = fix_expr.unwrap();
-            return make_fix_node(fix_expr_uw, loc + fix_expr_uw->loc);
+            return upcast(make_fix_node(fix_expr_uw, loc + fix_expr_uw->loc));
         }
         default:
             return Error{.text = "Синтаксическая ошибка: неожиданный токен", .at = buffer.front().loc};
@@ -318,7 +127,7 @@ NodeOrError parse_var(TokenBuffer& buffer) {
     auto _var = buffer.front();
     auto var = make_var_node(std::string(_var.data), _var.loc);
     buffer.pop();
-    return var;
+    return upcast(var);
 }
 
 NodeOrError parse_lambda(TokenBuffer& buffer) {
@@ -342,7 +151,7 @@ NodeOrError parse_lambda(TokenBuffer& buffer) {
         return definition;
     loc += definition.unwrap()->loc;
 
-    return make_func_node(std::dynamic_pointer_cast<VarNode>(var.unwrap()), definition.unwrap(), loc);
+    return upcast(make_func_node(std::dynamic_pointer_cast<VarNode>(var.unwrap()), definition.unwrap(), loc));
 }
 
 NodeOrError parse_let(TokenBuffer& buffer) {
@@ -376,7 +185,7 @@ NodeOrError parse_let(TokenBuffer& buffer) {
         return ret_expr;
     loc += ret_expr.unwrap()->loc;
 
-    return make_let_node(std::dynamic_pointer_cast<VarNode>(var.unwrap()), bind_expr.unwrap(), ret_expr.unwrap(), loc);
+    return upcast(make_let_node(std::dynamic_pointer_cast<VarNode>(var.unwrap()), bind_expr.unwrap(), ret_expr.unwrap(), loc));
 }
 
 NodeOrError parse_if_else(TokenBuffer& buffer) {
@@ -410,5 +219,5 @@ NodeOrError parse_if_else(TokenBuffer& buffer) {
         return false_expr;
     loc += false_expr.unwrap()->loc;
 
-    return make_branch_node(cond.unwrap(), true_expr.unwrap(), false_expr.unwrap(), loc);
+    return upcast(make_branch_node(cond.unwrap(), true_expr.unwrap(), false_expr.unwrap(), loc));
 }

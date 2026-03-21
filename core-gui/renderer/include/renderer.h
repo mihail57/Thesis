@@ -3,10 +3,11 @@
 #define RENDERER_H
 
 struct RendererState;
+struct AppState;
 
 class Renderer {
 public:
-    Renderer();
+    Renderer(AppState& app_state);
 
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;

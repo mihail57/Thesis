@@ -1,6 +1,6 @@
 
-#include "include/command.h"
-#include "include/event_buffer.h"
+#include "command.h"
+#include "event_buffer.h"
 #include "inference/command_handler.h"
 
 struct CommandDispatcher {

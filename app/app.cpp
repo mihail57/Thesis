@@ -7,32 +7,37 @@
 struct AppInternal
 {
     InferenceManager inf_mgr;
-    CommandDispatcher dispatcher;
+    std::optional<CommandDispatcher> dispatcher;
 
-    AppInternal(EventBuffer& event_buf) 
-        : inf_mgr(), dispatcher(build_dispatcher(event_buf)) {}
+    AppInternal() 
+        : inf_mgr(), dispatcher(std::nullopt) {}
 
-private:
-    CommandDispatcher build_dispatcher(EventBuffer& event_buf) {
-        return CommandDispatcher(CommandHandler(inf_mgr), event_buf);
+    void build_dispatcher(EventBuffer& event_buf) {
+        dispatcher.emplace(CommandDispatcher(CommandHandler(inf_mgr), event_buf));
     }
 };
 
-App::App(CommandBuffer& cmd_buf, EventBuffer& event_buf) 
-    : cmd_buf(cmd_buf), event_buf(event_buf),
-       internal(new AppInternal(event_buf)), app_state(internal->inf_mgr.state) {}
+App::App() 
+    : internal(new AppInternal()), app_state(internal->inf_mgr.state) {}
 
 App::~App() { delete internal; }
 
-void App::execute_commands() {
-    for(const auto& command: cmd_buf) {
-        std::visit(internal->dispatcher, command);
-    }
 
-    cmd_buf.clear();
+void App::bind_buffers(CommandBuffer& cmd_buf, EventBuffer& event_buf) {
+    this->cmd_buf = cmd_buf;
+    this->event_buf = event_buf;
+    internal->build_dispatcher(event_buf);
 }
 
-AppState App::get_app_state() const { return app_state; }
+void App::execute_commands() {
+    for(const auto& command: cmd_buf.value().get()) {
+        std::visit(*internal->dispatcher, command);
+    }
+
+    cmd_buf.value().get().clear();
+}
+
+AppState& App::get_app_state() { return app_state; }
 
 void App::set_default_properties(std::string input, InputType input_type, AlgorithmKind algorithm) {
     auto& inf_mgr = internal->inf_mgr;

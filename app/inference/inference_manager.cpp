@@ -2,8 +2,11 @@
 
 #include "inference_manager.h"
 #include "command_handler.h"
+#include "ast_helpers.h"
 
-#include <fmt/format.h>
+#include <fstream>
+#include <filesystem>
+#include <format>
 
 
 Type::base_ptr get_type(const Result& v) { return std::get<0>(v); }
@@ -17,8 +20,17 @@ bool InferenceManager::run_algorithm(bool detailed) {
     NodeOrError parsed;
     switch (state.input_type)
     {
-    case InputType::Lambda:
-        parsed = parse(state.input);
+    case InputType::File:
+    {
+        auto ifstream = std::ifstream(state.input);
+        state.expression = std::string(std::istreambuf_iterator<char>{ifstream}, {});
+        parsed = parse(state.expression);
+        break;
+    }
+
+    case InputType::Text:
+        state.expression = state.input;
+        parsed = parse(state.expression);
         break;
     
     default:
@@ -97,6 +109,20 @@ void InferenceManager::add_algorithm_step(const std::string& step_text, const st
         .data = step_text,
         .at = at
     });
+}
+
+
+static bool occurs_check(const std::shared_ptr<TypeVar>& var, const std::shared_ptr<Type>& type) {
+    if (auto t_var = std::dynamic_pointer_cast<TypeVar>(type)) {
+        return t_var->name == var->name;
+    } else if (auto t_func = std::dynamic_pointer_cast<FuncType>(type)) {
+        return occurs_check(var, t_func->arg_type) || occurs_check(var, t_func->ret_type);
+    } else if (auto t_cons = std::dynamic_pointer_cast<TypeConstructor>(type)) {
+        for(const auto& arg: t_cons->args) {
+            if(occurs_check(var, arg)) return true;
+        }
+    }
+    return false;
 }
 
 SubstitutionOrError InferenceManager::MGU(const std::shared_ptr<Type>& first, const std::shared_ptr<Type>& second) {
@@ -179,7 +205,7 @@ ResultOrError InferenceManager::W(
     std::shared_ptr<ConstNode> node
 ) {
     add_algorithm_step(
-        fmt::format("Тип константного выражения {}: {}", node->value, node->type),
+        std::format("Тип константного выражения {}: {}", node->value, node->type),
         node
     );
 
@@ -193,7 +219,7 @@ ResultOrError InferenceManager::W(
     auto sub = Substitution::make_identity();
     if(!gamma.has(node->var)) {
         add_algorithm_step(
-            fmt::format("Переменная {} отсутствует в контексте, завершаем алгоритм с ошибкой", node->var),
+            std::format("Переменная {} отсутствует в контексте, завершаем алгоритм с ошибкой", node->var),
             node
         );
 
@@ -204,7 +230,7 @@ ResultOrError InferenceManager::W(
     auto inst = scheme->instantiate();
     
     add_algorithm_step(
-        fmt::format("Получаем схему типа переменной {} из контекста: {}\n\nПолучаем экземпляр этой схемы: {}", node->var, scheme->to_str(), inst->to_str(false)),
+        std::format("Получаем схему типа переменной {} из контекста: {}\n\nПолучаем экземпляр этой схемы: {}", node->var, scheme->to_str(), inst->to_str(false)),
         node
     );
 
@@ -227,7 +253,7 @@ ResultOrError InferenceManager::W(
     );
     
     add_algorithm_step(
-        fmt::format(
+        std::format(
             "Создаём свежую типовую переменную {}\n"
             "Копируем контекст типизации, добавляем в неё связку {}: {}\n"
             "Вызываем W с копией контекста на теле функции.",
@@ -248,7 +274,7 @@ ResultOrError InferenceManager::W(
     auto result_type = std::shared_ptr<Type>(new FuncType(arg_type, body_type));
 
     add_algorithm_step(
-        fmt::format(
+        std::format(
             "Применяем полученную подстановку к свежей переменной {}:\n"
             "Результат - {} (тип аргумента лямбды)\n"
             "Тип тела функции (результат вложенного вызова W) - {}\n"
@@ -301,7 +327,7 @@ ResultOrError InferenceManager::W(
     auto result_type = s_3.apply_to(beta);
 
     add_algorithm_step(
-        fmt::format(
+        std::format(
             "Обработка применения (e1 e2):\n"
             "1) Тип функции e1: {}.\n"
             "2) Тип аргумента e2: {}.\n"
@@ -341,7 +367,7 @@ ResultOrError InferenceManager::W(
     new_ctx.set(node->bind_var->var, t_1_gen);
     
     add_algorithm_step(
-        fmt::format(
+        std::format(
             "Тип значения привязки T1: {}\n"
             "Применяем полученную подстановку к контексту типизации\n"
             "Обобщаем тип значения привязки относительно этого контекста.\n"
@@ -364,7 +390,7 @@ ResultOrError InferenceManager::W(
     auto [t_2, s_2] = res_2.unwrap();
 
     add_algorithm_step(
-        fmt::format(
+        std::format(
             "Полученный тип возвращаемого значения T2: {}\n"
             "В качестве подстановки возвращаем композицию S2 и S1.",
             t_2->to_str(false)
@@ -420,7 +446,7 @@ ResultOrError InferenceManager::W(
 
     auto result_type = s_5.apply_to(t_3);
     add_algorithm_step(
-        fmt::format(
+        std::format(
             "Обработка ветвления if-then-else:\n"
             "1) Тип условия: {} (должен унифицироваться с Bool).\n"
             "2) Тип then-ветки: {}.\n"
@@ -459,7 +485,7 @@ ResultOrError InferenceManager::W(
 
     auto result_type = s_2.apply_to(beta);
     add_algorithm_step(
-        fmt::format(
+        std::format(
             "Обработка fix-узла:\n"
             "1) Тип внутреннего выражения: {}.\n"
             "2) Требуем форму {} -> {} и унифицируем.\n"
@@ -512,7 +538,7 @@ SubstitutionOrError InferenceManager::M(
     }
 
     add_algorithm_step(
-        fmt::format(
+        std::format(
             "M-алгоритм для константы {}:\n"
             "1) Ожидаемый тип: {}.\n"
             "2) Фактический тип константы: {}.\n"
@@ -543,7 +569,7 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Va
     }
 
     add_algorithm_step(
-        fmt::format(
+        std::format(
             "M-алгоритм для переменной {}:\n"
             "1) Ожидаемый тип: {}.\n"
             "2) Схема из контекста: {}.\n"
@@ -590,7 +616,7 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Fu
 
     auto result_sub = s_2 + s_1;
     add_algorithm_step(
-        fmt::format(
+        std::format(
             "M-алгоритм для λ-узла λ{}.body:\n"
             "1) Ожидаемый тип приводим к функциональному виду b1 -> b2.\n"
             "2) Параметру назначаем тип {}.\n"
@@ -623,7 +649,7 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Ap
     auto s_2 = result_2.unwrap();
 
     add_algorithm_step(
-        fmt::format(
+        std::format(
             "M-алгоритм для применения (e1 e2):\n"
             "1) Для функции ожидаем тип {} -> {}.\n"
             "2) После первой подстановки проверяем аргумент с ожиданием {}.\n"
@@ -658,7 +684,7 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Le
     auto s_2 = result_2.unwrap();
 
     add_algorithm_step(
-        fmt::format(
+        std::format(
             "M-алгоритм для let-узла let {} = e1 in e2:\n"
             "1) Проверяем e1 против свежего типа {}.\n"
             "2) Обобщаем полученный тип и расширяем контекст.\n"
@@ -675,10 +701,54 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Le
 }
 
 SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<BranchNode> node, Type::base_ptr expected) {
-    return Error{.text = "Не имплементированно", .at = node->loc};
+    auto result_1 = M(gamma, node->cond_expr, make_const_type("Bool"));
+    if(result_1.is_error()) {
+        return result_1;
+    }
+    auto s_1 = result_1.unwrap();
+
+    auto new_ctx = s_1.apply_to(gamma);
+    auto s_1_expected = s_1.apply_to(expected);
+
+    auto result_2 = M(new_ctx, node->true_expr, s_1_expected);
+    if(result_2.is_error()) {
+        return result_2;
+    }
+    auto s_2 = result_2.unwrap();
+
+    auto s_2_1 = s_2 + s_1;
+    new_ctx = s_2_1.apply_to(gamma);
+    auto s_2_1_expected = s_2_1.apply_to(expected);
+
+    auto result_3 = M(new_ctx, node->false_expr, s_2_1_expected);
+    if(result_3.is_error()) {
+        return result_3;
+    }
+    auto s_3 = result_3.unwrap();
+
+    return s_3 + s_2 + s_1;
 }
+
 SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<FixNode> node, Type::base_ptr expected) {    
-    return Error{.text = "Не имплементированно", .at = node->loc};
+    auto beta = TypeVar::generate_fresh();
+    auto func = make_func_type(beta, beta);
+    
+    auto result_1 = M(gamma, node->func, func);
+    if(result_1.is_error()) {
+        return result_1;
+    }
+    auto s_1 = result_1.unwrap();
+
+    auto s_1_expected = s_1.apply_to(expected);
+    auto s_1_beta = s_1.apply_to(beta);
+
+    auto result_2 = MGU(s_1_expected, s_1_beta);
+    if(result_2.is_error()) {
+        return result_2;
+    }
+    auto s_2 = result_2.unwrap();
+
+    return s_2 + s_1;
 }
 
 SubstitutionOrError InferenceManager::M(
@@ -707,10 +777,10 @@ SubstitutionOrError InferenceManager::M(
 
 std::string InferenceManager::highlight_loc(const std::string& source, const SourceLoc& loc) {
     SourceLoc::pos_t source_show_start = 0;
-    SourceLoc::pos_t source_show_end   = source.size() - 1;
+    SourceLoc::pos_t source_show_end   = source.size();
 
     std::ostringstream ss;
-    ss << source.substr(source_show_start, source_show_end - source_show_start + 1) << std::endl;
+    ss << source.substr(source_show_start, source_show_end - source_show_start) << std::endl;
     for(auto i = source_show_start; i <= source_show_end; i++) { 
         if(i >= loc.start && i < loc.end) ss << '~';
         else ss << ' ';
@@ -745,11 +815,11 @@ TypingContext InferenceManager::make_basic_context() {
         make_func_type(list, list)
     )); //∀α. List α -> List α
 
-    auto nil_id = _make_var_node("[]", SourceLoc());
-    auto cons_id = _make_var_node("::", SourceLoc());
-    auto equal_id = _make_var_node("equal", SourceLoc());
-    auto hd_id = _make_var_node("hd", SourceLoc());
-    auto tl_id = _make_var_node("tl", SourceLoc());
+    auto nil_id = make_var_node("[]", SourceLoc());
+    auto cons_id = make_var_node("::", SourceLoc());
+    auto equal_id = make_var_node("equal", SourceLoc());
+    auto hd_id = make_var_node("hd", SourceLoc());
+    auto tl_id = make_var_node("tl", SourceLoc());
     TypingContext tctx;
     tctx.set(nil_id->var, nil);
     tctx.set(cons_id->var, cons);

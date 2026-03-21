@@ -35,6 +35,8 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(Freetype)
 
+include_directories(${INFRASTRUCTURE_DIR})
+
 if (WIN32)
     set_property(TARGET core-gui PROPERTY WIN32_EXECUTABLE ON)
 endif()

@@ -1,21 +1,12 @@
 
-add_library(app SHARED)
+add_library(app STATIC)
 if(WIN32)
     set_target_properties(app PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
-include(FetchContent)
-
-FetchContent_Declare(
-    fmt
-    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-    GIT_TAG 10.2.1
-)
-FetchContent_MakeAvailable(fmt)
-
 target_include_directories(app PUBLIC include)
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${INFRASTRUCTURE_DIR})
 
 set(sources
     app.cpp
@@ -23,9 +14,10 @@ set(sources
     inference/ast.cpp
     inference/hm_def/inference_context.cpp
     inference/hm_def/type.cpp
-    inference/temporary/lambda_parser.cpp
+    inference/hm_def/substitution.cpp
+    inference/hm_def/type_scheme.cpp
+    inference/lambda_parser/lambda_parser.cpp
+    inference/lambda_parser/token_buffer.cpp
 )
 
 target_sources(app PRIVATE ${sources})
-
-target_link_libraries(app PRIVATE fmt::fmt-header-only)

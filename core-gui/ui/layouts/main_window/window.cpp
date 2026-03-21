@@ -10,29 +10,70 @@
 
 #include "imgui.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <commdlg.h>
+#else
+#include <cstdio>
+#endif
+
 #include <algorithm>
 #include <cstring>
 #include <string>
 #include <vector>
 
 
+static std::optional<std::string> OpenFileDialog() {
+#if defined(_WIN32)
+    char filename[MAX_PATH];
+    filename[0] = '\0';
+
+    OPENFILENAMEA ofn;
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = nullptr;
+    ofn.lpstrFilter = "All Files\0*.*\0Text Files\0*.txt\0Haskell\0*.hs\0";
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFile = filename;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_DONTADDTORECENT | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+
+    if (GetOpenFileNameA(&ofn)) {
+        return std::string(filename);
+    }
+#elif defined(__linux__)
+    FILE* f = popen("zenity --file-selection", "r");
+    if (f) {
+        char buffer[1024];
+        if (fgets(buffer, sizeof(buffer), f) != nullptr) {
+            std::string result(buffer);
+            if (!result.empty() && result.back() == '\n') {
+                result.pop_back();
+            }
+            pclose(f);
+            return result;
+        }
+        pclose(f);
+    }
+#endif
+    return std::nullopt;
+}
+
+
+
 static void set_ui_state_from_inf_mgr_state(MainWindowState& window, const InferenceManagerState& inf_mgr_state) {
-	CopyStringToBuffer(window.text_input, inf_mgr_state.input);
-	CopyStringToBuffer(window.expr_vis_state.ast_source_copy, inf_mgr_state.input);
+	if(window.input_type == InputType::File)
+		CopyStringToBuffer(window.file_path, inf_mgr_state.input);
+	else
+		CopyStringToBuffer(window.text_input, inf_mgr_state.input);
+	
+	CopyStringToBuffer(window.expr_vis_state.ast_source_copy, inf_mgr_state.expression);
 	window.input_type = inf_mgr_state.input_type;
 	window.algorithm = inf_mgr_state.algorithm;
 	window.expr_vis_state.root = inf_mgr_state.input_parsed;
 	window.step_vis_state.alg_state = inf_mgr_state.alg_state;
 	window.result = inf_mgr_state.result;
 	++window.step_vis_state.steps_ui_generation;
-}
-
-int InputTypeToComboIndex(InputType input_type) {
-	return input_type == InputType::Lambda ? 0 : 1;
-}
-
-InputType ComboIndexToInputType(int idx) {
-	return idx == 0 ? InputType::Lambda : InputType::Haskell;
 }
 
 int AlgorithmKindToComboIndex(AlgorithmKind algorithm) {
@@ -100,23 +141,26 @@ void DrawHorizontalSplitter(float width, float thickness, float& top_height, flo
 }
 
 void DrawTopLeftPanel(CommandBuffer& cmd_buf, MainWindowState& state) {
-	int input_type_combo_index = InputTypeToComboIndex(state.input_type);
 	int algorithm_combo_index = AlgorithmKindToComboIndex(state.algorithm);
 
 	ImGui::Checkbox("Показать правую панель", &state.expr_vis_state.right_panel_open);
 	ImGui::Separator();
 
-	const bool text_selected = state.input_mode == MainInputMode::Text;
-	if (ImGui::RadioButton("Текстовый ввод", text_selected)) {
-		state.input_mode = MainInputMode::Text;
+	const bool text_selected = state.input_type == InputType::Text;
+	if (ImGui::RadioButton("Текстовый ввод", text_selected) && state.input_type != InputType::Text) {
+		state.input_type = InputType::Text;
+		cmd_buf.push(SetInputTypeCommand{.new_input_type = state.input_type});
+		ResetMainWindowUiAfterInferenceReset(state);
 	}
 	ImGui::SameLine();
-	const bool file_selected = state.input_mode == MainInputMode::File;
-	if (ImGui::RadioButton("Выбор файла", file_selected)) {
-		state.input_mode = MainInputMode::File;
+	const bool file_selected = state.input_type == InputType::File;
+	if (ImGui::RadioButton("Выбор файла", file_selected) && state.input_type != InputType::File) {
+		state.input_type = InputType::File;
+		cmd_buf.push(SetInputTypeCommand{.new_input_type = state.input_type});
+		ResetMainWindowUiAfterInferenceReset(state);
 	}
 
-	if (state.input_mode == MainInputMode::Text) {
+	if (state.input_type == InputType::Text) {
 		ImGui::InputTextMultiline(
 			"##text_input",
 			state.text_input.data(),
@@ -126,20 +170,15 @@ void DrawTopLeftPanel(CommandBuffer& cmd_buf, MainWindowState& state) {
 	} else {
 		ImGui::InputText("Файл", state.file_path.data(), state.file_path.size());
 		ImGui::SameLine();
-		ImGui::Button("...");
+		if (ImGui::Button("...")) {
+			if (auto path = OpenFileDialog()) {
+				CopyStringToBuffer(state.file_path, *path);
+			}
+		}
 	}
 
-	const char* first_combo_items[] = {"Lambda", "Haskell"};
 	const char* second_combo_items[] = {"W", "M"};
-	ImGui::Combo("Тип ввода", &input_type_combo_index, first_combo_items, IM_ARRAYSIZE(first_combo_items));
 	ImGui::Combo("Алгоритм", &algorithm_combo_index, second_combo_items, IM_ARRAYSIZE(second_combo_items));
-
-	const InputType selected_input_type = ComboIndexToInputType(input_type_combo_index);
-	if (selected_input_type != state.input_type) {
-		cmd_buf.push(SetInputTypeCommand{selected_input_type});
-		state.input_type = selected_input_type;
-		ResetMainWindowUiAfterInferenceReset(state);
-	}
 
 	const AlgorithmKind selected_algorithm = ComboIndexToAlgorithmKind(algorithm_combo_index);
 	if (selected_algorithm != state.algorithm) {
@@ -149,7 +188,13 @@ void DrawTopLeftPanel(CommandBuffer& cmd_buf, MainWindowState& state) {
 	}
 
 	if (ImGui::Button("Запустить")) {
-		cmd_buf.push(SetInputCommand{std::string(state.text_input.data())});
+		std::string input;
+		if(state.input_type == InputType::File)
+			input = std::string(state.file_path.data());
+		else
+			input = std::string(state.text_input.data());
+		
+		cmd_buf.push(SetInputCommand{input});
 		cmd_buf.push(RunAlgorithmCommand{true});
 	}
 
@@ -159,13 +204,20 @@ void DrawTopLeftPanel(CommandBuffer& cmd_buf, MainWindowState& state) {
 	if (!state.result.has_value()) {
 		ImGui::TextDisabled("Пока нет результата");
 	} else {
+		if (state.monospace_font) ImGui::PushFont(state.monospace_font);
 		ImGui::TextWrapped("%s", state.result.value().data());
+		if (state.monospace_font) ImGui::PopFont();
 	}
 	ImGui::EndChild();
 }
 
 MainWindowState::MainWindowState(const AppState& app_state) {
 	set_ui_state_from_inf_mgr_state(*this, app_state.inf_mgr_state);
+        
+        if (!app_state.monospace_font_path.empty()) {
+            ImGuiIO& io = ImGui::GetIO();
+            monospace_font = io.Fonts->AddFontFromFileTTF(app_state.monospace_font_path.c_str(), app_state.font_size);
+        }
 }
 
 void DrawMainWindow(CommandBuffer& cmd_buf, MainWindowState& main_window) {
@@ -197,32 +249,29 @@ void DrawMainWindow(CommandBuffer& cmd_buf, MainWindowState& main_window) {
 	ImVec2 child_available = ImGui::GetContentRegionAvail();
 	float panel_height = std::max(child_available.y, 1.0f);
 
-	if (!main_window.expr_vis_state.right_panel_open) {
-		ImGui::BeginChild("TopLeftPanel", ImVec2(0.0f, panel_height), true);
-		DrawTopLeftPanel(cmd_buf, main_window);
-		ImGui::EndChild();
-		return;
-	}
-
 	constexpr float min_left_width = 260.0f;
 	constexpr float min_right_width = 220.0f;
 
 	float right_width = std::clamp(main_window.expr_vis_state.right_panel_width, min_right_width, std::max(min_right_width, available.x - min_left_width - splitter_thickness));
-	float left_width = std::max(min_left_width, child_available.x - right_width - splitter_thickness);
+	float left_width = main_window.expr_vis_state.right_panel_open
+		? std::max(min_left_width, child_available.x - right_width - splitter_thickness)
+		: child_available.x;
 
 	ImGui::BeginChild("TopLeftPanel", ImVec2(left_width, panel_height), true);
 	DrawTopLeftPanel(cmd_buf, main_window);
 	ImGui::EndChild();
 
-	ImGui::SameLine(0.0f, 0.0f);
-	ImGui::PushID("TopPanelVerticalSplitter");
-	DrawVerticalSplitter(panel_height, splitter_thickness, left_width, right_width, min_left_width, min_right_width);
-	ImGui::PopID();
+	if(main_window.expr_vis_state.right_panel_open) {
+		ImGui::SameLine(0.0f, 0.0f);
+		ImGui::PushID("TopPanelVerticalSplitter");
+		DrawVerticalSplitter(panel_height, splitter_thickness, left_width, right_width, min_left_width, min_right_width);
+		ImGui::PopID();
 
-	main_window.expr_vis_state.panel_height = panel_height;
-	DrawExpressionVisualizer(main_window.expr_vis_state, cmd_buf);
+		main_window.expr_vis_state.panel_height = panel_height;
+		DrawExpressionVisualizer(main_window.expr_vis_state, cmd_buf);
 
-	main_window.expr_vis_state.right_panel_width = right_width;
+		main_window.expr_vis_state.right_panel_width = right_width;
+	}
 	ImGui::EndChild();
 
 	ImGui::PushID("MainWindowHorizontalSplitter");

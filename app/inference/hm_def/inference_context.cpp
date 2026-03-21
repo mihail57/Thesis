@@ -1,6 +1,8 @@
 
 #include "inference_context.h"
+
 #include <unordered_set>
+#include <algorithm>
 
 
 bool TypingContext::has(const std::string& var) {

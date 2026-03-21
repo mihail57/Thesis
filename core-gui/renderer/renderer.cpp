@@ -1,5 +1,6 @@
 
 #include "renderer.h"
+#include "../../infrastructure/app_state.h"
 
 #ifdef _WIN32
 #ifndef _CRT_SECURE_NO_WARNINGS
@@ -34,26 +35,26 @@ extern char** environ;
 
 struct RendererState
 {        
-    VkAllocationCallbacks*   g_Allocator = nullptr;
-    VkInstance               g_Instance = VK_NULL_HANDLE;
-    VkPhysicalDevice         g_PhysicalDevice = VK_NULL_HANDLE;
-    VkDevice                 g_Device = VK_NULL_HANDLE;
-    uint32_t                 g_QueueFamily = (uint32_t)-1;
-    VkQueue                  g_Queue = VK_NULL_HANDLE;
-    VkPipelineCache          g_PipelineCache = VK_NULL_HANDLE;
-    VkDescriptorPool         g_DescriptorPool = VK_NULL_HANDLE;
+    VkAllocationCallbacks*   g_Allocator        = VK_NULL_HANDLE;
+    VkInstance               g_Instance         = VK_NULL_HANDLE;
+    VkPhysicalDevice         g_PhysicalDevice   = VK_NULL_HANDLE;
+    VkDevice                 g_Device           = VK_NULL_HANDLE;
+    uint32_t                 g_QueueFamily      = (uint32_t)-1;
+    VkQueue                  g_Queue            = VK_NULL_HANDLE;
+    VkPipelineCache          g_PipelineCache    = VK_NULL_HANDLE;
+    VkDescriptorPool         g_DescriptorPool   = VK_NULL_HANDLE;
 
     ImGui_ImplVulkanH_Window g_MainWindowData;
-    uint32_t                 g_MinImageCount = 2;
+    uint32_t                 g_MinImageCount    = 2;
     bool                     g_SwapChainRebuild = false;
     
     #ifdef _DEBUG
     #define APP_USE_VULKAN_DEBUG_REPORT
-    VkDebugReportCallbackEXT g_DebugReport = VK_NULL_HANDLE;
+    VkDebugReportCallbackEXT g_DebugReport      = VK_NULL_HANDLE;
     #endif
 
     GLFWwindow*              window;
-    ImVec4                   clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+    ImVec4                   clear_color        = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 };
 
 
@@ -511,16 +512,45 @@ bool LoadImGuiSystemFontOnce(GLFWwindow* window) {
     return loaded_font != nullptr;
 }
 
+std::string FindMonospaceFontPath() {
+    std::vector<std::string> candidates;
 
+#if defined(_WIN32)
+    const auto windir_env = GetEnvironmentVariableValue("WINDIR");
+    const std::string windir = windir_env.has_value() ? *windir_env : "C:\\Windows";
 
-void SetupImGui(GLFWwindow* window) {
+    candidates = {
+        windir + "\\Fonts\\consola.ttf",
+        windir + "\\Fonts\\lucon.ttf",
+        windir + "\\Fonts\\cour.ttf"
+    };
+#elif defined(__linux__)
+    candidates = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
+    };
+#endif
+
+    for (const std::string& path : candidates) {
+        if (std::filesystem::exists(path))
+            return path;
+    }
+
+    return "";
+}
+
+void SetupImGui(GLFWwindow* window, AppState& app_state) {
     // Setup Dear ImGui style based on system preference when available.
     ApplySystemThemeOrLightFallback();
     LoadImGuiSystemFontOnce(window);
+    app_state.monospace_font_path = FindMonospaceFontPath();
+    app_state.font_size = ComputeInitialFontSize(window);
 }
 
 
-Renderer::Renderer() {
+Renderer::Renderer(AppState& app_state) {
     state = new RendererState();
 
     glfwSetErrorCallback(glfw_error_callback);
@@ -588,7 +618,7 @@ Renderer::Renderer() {
     init_info.CheckVkResultFn = check_vk_result;
     ImGui_ImplVulkan_Init(&init_info);
 
-    SetupImGui(state->window);
+    SetupImGui(state->window, app_state);
 }
 
 Renderer::Renderer(Renderer&& other) noexcept : state(other.state) {
@@ -635,13 +665,6 @@ bool Renderer::BeforeFrame() {
         ImGui_ImplGlfw_Sleep(10);
         return false;
     }
-
-    // Font Reloading Logic. REDO
-    // if (g_Style.FontDirty) {
-    //     vkDeviceWaitIdle(state->g_Device);
-    //     // ReloadFonts(io, main_scale);    
-    //     // g_Style.FontDirty = false;
-    // }
 
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();

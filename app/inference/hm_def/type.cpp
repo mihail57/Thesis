@@ -1,6 +1,8 @@
 
 #include "type.h"
 
+#include <algorithm>
+#include <sstream>
 
 // Типы
 

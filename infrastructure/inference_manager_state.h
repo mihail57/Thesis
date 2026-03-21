@@ -10,11 +10,12 @@ enum class AlgorithmKind {
 };
 
 enum class InputType {
-    Lambda, Haskell
+    Text, File
 };
 
 struct InferenceManagerState {
     std::string input;
+    std::string expression;
     std::shared_ptr<AstNode> input_parsed;
     InputType input_type;
     AlgorithmKind algorithm;

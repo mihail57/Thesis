@@ -1,7 +1,5 @@
 
 #include "app.h"
-#include "event_buffer.h"
-#include "command_buffer.h"
 #include "../flag_parser.hpp"
 
 #include <iostream>
@@ -9,6 +7,7 @@
 #include <filesystem>
 #include <vector>
 #include <string>
+#include <fstream>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -20,7 +19,7 @@
 
 namespace {
 
-std::filesystem::path get_current_executable_dir() {
+std::filesystem::path get_current_dir() {
 #ifdef _WIN32
     char exe_path[MAX_PATH] = {0};
     auto len = GetModuleFileNameA(nullptr, exe_path, MAX_PATH);
@@ -40,13 +39,17 @@ std::filesystem::path get_current_executable_dir() {
 }
 
 template<typename Flags>
-std::vector<std::string> make_gui_forwarded_args(const Flags& flags) {
+std::vector<std::string> serialize_flags(const Flags& flags) {
     std::vector<std::string> args;
 
     if (flags.template is_flag_set<'W'>()) args.emplace_back("-W");
     if (flags.template is_flag_set<'M'>()) args.emplace_back("-M");
     if (flags.template is_flag_set<'l'>()) args.emplace_back("-l");
     if (flags.template is_flag_set<'h'>()) args.emplace_back("-h");
+    if (flags.template is_flag_set<'f'>()) {
+        args.emplace_back("-f");
+        args.emplace_back(flags.template get_flag_value<'f'>().value());
+    }
 
     for (const auto& positional : flags.get_positional()) {
         args.emplace_back(positional);
@@ -76,13 +79,13 @@ std::string quote_windows_arg(const std::string& arg) {
 #endif
 
 template<typename Flags>
-bool launch_gui_from_same_dir(const Flags& flags) {
-    const auto exe_dir = get_current_executable_dir();
+bool launch_gui(const Flags& flags) {
+    const auto exe_dir = get_current_dir();
     if (exe_dir.empty()) {
         return false;
     }
 
-    const auto passthrough_args = make_gui_forwarded_args(flags);
+    const auto passthrough_args = serialize_flags(flags);
 
 #ifdef _WIN32
     const auto gui_path = exe_dir / "core-gui.exe";
@@ -159,26 +162,25 @@ bool launch_gui_from_same_dir(const Flags& flags) {
 } // namespace
 
 class Main {
-    CommandBuffer cmd_buf;
-    EventBuffer event_buf;
     App app;
 
     template<typename ConsoleArgs>
     auto console_args_to_params(const ConsoleArgs& args) {
         auto positional_container = args.get_positional();     
         std::string input;
-        if(positional_container.size() == 0)
+        if(args.template is_flag_set<'f'>())
+            input = args.template get_flag_value<'f'>().value();
+        else if(positional_container.size() == 0)
             std::getline(std::cin, input);
         else input = positional_container[0];
 
-        auto input_type = args.template is_flag_set<"haskell">() ? InputType::Haskell : InputType::Lambda;
+        auto input_type = args.template is_flag_set<'f'>() ? InputType::File : InputType::Text;
         auto algorithm = args.template is_flag_set<"algorithm_m">() ? AlgorithmKind::M : AlgorithmKind::W;
         return std::make_tuple(input, input_type, algorithm);
     }
 
 public:
-    Main() : cmd_buf(), event_buf(), app(cmd_buf, event_buf) {
-    }
+    Main() : app() {}
 
     template<typename ConsoleArgs>
     bool run(const ConsoleArgs& flags) {
@@ -195,7 +197,8 @@ public:
 template<typename Flags>
 bool check_flags(const Flags& flags) {
     return flags.template is_flag_set<'W'>() && flags.template is_flag_set<'M'>() ||
-           flags.template is_flag_set<'l'>() && flags.template is_flag_set<'h'>();
+           flags.template is_flag_set<'l'>() && flags.template is_flag_set<'h'>() ||
+           flags.template is_flag_set<'f'>() && flags.get_positional().size() != 0;
 }
 
 int main(int argc, char** argv) {
@@ -209,7 +212,8 @@ int main(int argc, char** argv) {
         flag_data{'M', "algorithm_m", "Использовать алгоритм M для вывода типов", flag_type::BOOLEAN},
         flag_data{'l', "lambda", "Использовать ввод в расширенном лямбда-исчислении (по умолчанию)", flag_type::BOOLEAN},
         flag_data{'h', "haskell", "Использовать ввод на Haskell", flag_type::BOOLEAN},
-        flag_data{'g', "gui", "Открыть интерактивную версию вместо консольной", flag_type::BOOLEAN}
+        flag_data{'g', "gui", "Открыть интерактивную версию вместо консольной", flag_type::BOOLEAN},
+        flag_data{'f', "file", "Режим ввода через файл. В качестве параметра должен передаваться путь. Несовместимо с передачей выражения как параметра", flag_type::VALUE}
     };
     constexpr auto flag_parser = make_flag_parser<possible_flags, 0, 1>();
     auto parse_res = flag_parser.process_args(argc, argv);
@@ -226,8 +230,13 @@ int main(int argc, char** argv) {
         return -1;
     }
 
+    if(parsed_flags.is_flag_set<'f'>() && !std::filesystem::exists(std::filesystem::path(parsed_flags.get_flag_value<'f'>().value()))) {
+        std::cerr << "Указанный файл не найден: " << parsed_flags.get_flag_value<'f'>().value() << ".\n\n" << flag_parser.help_string(argv[0]) << std::endl;
+        return -1;
+    }
+
     if(parsed_flags.is_flag_set<'g'>()) {
-        if(!launch_gui_from_same_dir(parsed_flags)) {
+        if(!launch_gui(parsed_flags)) {
             std::cerr << "Не удалось запустить core-gui из директории текущего исполняемого файла." << std::endl;
             return -1;
         }

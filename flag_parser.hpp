@@ -18,7 +18,7 @@ enum class flag_type { VALUE, BOOLEAN };
 struct flag_data {
     char flag_short;
     char flag_long[20];
-    char msg[200];
+    char msg[300];
     flag_type type;
 };
 

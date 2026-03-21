@@ -7,13 +7,13 @@
 #include <exception>
 
 #include "value_or_error.hpp"
-#include "temporary/lambda_parser.h"
+#include "lambda_parser/lambda_parser.h"
 #include "hm_def/type.h"
 #include "hm_def/substitution.h"
 #include "hm_def/type_scheme.h"
 #include "hm_def/inference_context.h"
 
-#include "../include/inference_manager_state.h"
+#include "inference_manager_state.h"
 
 
 using Result = std::tuple<Type::base_ptr, Substitution>;
