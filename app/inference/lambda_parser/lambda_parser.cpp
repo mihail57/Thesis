@@ -1,17 +1,18 @@
 
 #include "../ast_helpers.h"
-#include "token_buffer.h"
 #include "lambda_parser.h"
 
 #include <algorithm>
 
 
 /*
-expr = let | if_else | lambda | app | term
-let = LET var EQUAL expr IN expr
+expr = let | if_else | lambda | infix
+let = LET var "=" expr IN expr
 if_else = IF expr THEN expr ELSE expr
 lambda = LAMBDA var DOT expr
-app = app term
+infix = prefix (op prefix)*
+prefix = ('!' | '-')* app
+app = term term*
 term = const | var | LPAREN expr RPAREN | FIX expr
 const = DATA
 var = IDENTIFIER
@@ -20,15 +21,23 @@ var = IDENTIFIER
 
 bool expect(TokenBuffer& buffer, TokenKind t);
 NodeOrError parse_expr(TokenBuffer& buffer);
-NodeOrError parse_app_or_term(TokenBuffer& buffer);
+NodeOrError parse_infix(TokenBuffer& buffer, int min_prec = 1);
+NodeOrError parse_prefix(TokenBuffer& buffer);
+NodeOrError parse_app(TokenBuffer& buffer);
 NodeOrError parse_term(TokenBuffer& buffer);
 NodeOrError parse_var(TokenBuffer& buffer);
 NodeOrError parse_lambda(TokenBuffer& buffer);
 NodeOrError parse_let(TokenBuffer& buffer);
 NodeOrError parse_if_else(TokenBuffer& buffer);
 
-NodeOrError parse(const std::string& source) {
-    TokenBuffer lexer(source);
+bool is_binary_infix_op(const Token& token);
+bool is_unary_prefix_op(const Token& token);
+int get_op_precedence(const Token& token);
+
+LambdaParser::LambdaParser(const std::string_view& expression)
+    : lexer(expression) {}
+
+NodeOrError LambdaParser::parse() {
     auto result = parse_expr(lexer);
 
     if(result.is_error())
@@ -51,22 +60,28 @@ NodeOrError parse_expr(TokenBuffer& buffer) {
         case TokenKind::LAMBDA:
             return parse_lambda(buffer);
         default:
-            return parse_app_or_term(buffer);
+            return parse_infix(buffer);
     }
 }
 
-bool term_like(TokenBuffer& buffer) {
+bool term_start_like(TokenBuffer& buffer) {
     auto head = buffer.front();
-    return head.kind == TokenKind::DATA || head.kind == TokenKind::IDENTIFIER || head.kind == TokenKind::LPAREN;
+    if(head.kind == TokenKind::DATA || head.kind == TokenKind::LPAREN || head.kind == TokenKind::FIX)
+        return true;
+
+    if(head.kind == TokenKind::IDENTIFIER && !is_binary_infix_op(head))
+        return true;
+
+    return false;
 }
 
-NodeOrError parse_app_or_term(TokenBuffer& buffer) {
+NodeOrError parse_app(TokenBuffer& buffer) {
     auto result = parse_term(buffer);
     if(result.is_error())
         return result;
     auto loc = result.unwrap()->loc;
 
-    while (term_like(buffer))
+    while (term_start_like(buffer))
     {
         auto right = parse_term(buffer);
         if(right.is_error())
@@ -76,6 +91,68 @@ NodeOrError parse_app_or_term(TokenBuffer& buffer) {
         result = upcast(make_app_node(result.unwrap(), right.unwrap(), loc));
     }
     return result;
+}
+
+NodeOrError parse_prefix(TokenBuffer& buffer) {
+    auto head = buffer.front();
+    if(!is_unary_prefix_op(head))
+        return parse_app(buffer);
+
+    auto op = make_var_node(std::string(head.data), head.loc);
+    buffer.pop();
+
+    // Унарные операторы могут быть в скобках: (!) или (-)
+    if(expect(buffer, TokenKind::RPAREN))
+        return upcast(op);
+
+    auto right = parse_prefix(buffer);
+    if(right.is_error())
+        return right;
+
+    auto right_uw = right.unwrap();
+
+    // Унарный минус преобразуется в бинарный: -x ==> (-) 0 x
+    if(op->var == "-") {
+        auto zero = make_const_node("0", "Int", op->loc);
+        auto partial = make_app_node(op, zero, op->loc + zero->loc);
+        auto loc = partial->loc + right_uw->loc;
+        return upcast(make_app_node(partial, right_uw, loc));
+    }
+
+    auto loc = op->loc + right_uw->loc;
+    return upcast(make_app_node(op, right_uw, loc));
+}
+
+NodeOrError parse_infix(TokenBuffer& buffer, int min_prec) {
+    auto left = parse_prefix(buffer);
+    if(left.is_error())
+        return left;
+
+    while (true)
+    {
+        auto head = buffer.front();
+        if(!is_binary_infix_op(head))
+            break;
+
+        auto prec = get_op_precedence(head);
+        if(prec < min_prec)
+            break;
+
+        auto op = make_var_node(std::string(head.data), head.loc);
+        buffer.pop();
+
+        auto right = parse_infix(buffer, prec + 1);
+        if(right.is_error())
+            return right;
+
+        auto left_uw = left.unwrap();
+        auto right_uw = right.unwrap();
+        auto loc = left_uw->loc + op->loc + right_uw->loc;
+        auto partial = make_app_node(op, left_uw, op->loc + left_uw->loc);
+        left = upcast(make_app_node(partial, right_uw, loc));
+    }
+
+    return left;
 }
 
 NodeOrError parse_term(TokenBuffer& buffer) {
@@ -94,6 +171,8 @@ NodeOrError parse_term(TokenBuffer& buffer) {
             auto result = parse_expr(buffer);
             if(!expect(buffer, TokenKind::RPAREN))
                 return Error{.text = "Синтаксическая ошибка: ожидалось \')\'", .at = buffer.front().loc};
+            else if(result.is_error())
+                return result;
             auto result_uw = result.unwrap();
             auto rparen_loc = buffer.front().loc;
             buffer.pop();
@@ -118,6 +197,32 @@ NodeOrError parse_term(TokenBuffer& buffer) {
 
 bool expect(TokenBuffer& buffer, TokenKind t) {
     return buffer.front().kind == t; 
+}
+
+bool is_binary_infix_op(const Token& token) {
+    if(token.kind != TokenKind::IDENTIFIER)
+        return false;
+
+    return token.data == "||"
+        || token.data == "&&"
+        || token.data == "="
+        || token.data == "+"
+        || token.data == "-"
+        || token.data == "*"
+        || token.data == "/";
+}
+
+bool is_unary_prefix_op(const Token& token) {
+    return token.kind == TokenKind::IDENTIFIER && (token.data == "!" || token.data == "-");
+}
+
+int get_op_precedence(const Token& token) {
+    if(token.data == "||") return 1;
+    if(token.data == "&&") return 2;
+    if(token.data == "=") return 3;
+    if(token.data == "+" || token.data == "-") return 4;
+    if(token.data == "*" || token.data == "/") return 5;
+    return 0;
 }
 
 NodeOrError parse_var(TokenBuffer& buffer) {
@@ -165,7 +270,8 @@ NodeOrError parse_let(TokenBuffer& buffer) {
         return var;
     loc += var.unwrap()->loc;
     
-    if(!expect(buffer, TokenKind::EQUAL))
+    auto head = buffer.front();
+    if(!(head.kind == TokenKind::IDENTIFIER && head.data == "="))
         return Error{.text = "Синтаксическая ошибка: ожидалось \'=\'", .at = buffer.front().loc};
     loc += buffer.front().loc;
     buffer.pop();

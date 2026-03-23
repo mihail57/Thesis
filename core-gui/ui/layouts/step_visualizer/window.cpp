@@ -5,20 +5,17 @@
 #include "imgui.h"
 
 void StepVisualizerState::reset() {
-	hovered_step_node = nullptr;
+	hovered_step_node.reset();
 	alg_state.steps.clear();
 	++steps_ui_generation;
 }
 
-
-// Определены в expression_visualizer
-
-void DrawStepVisualizer(StepVisualizerState& step_vis_state, CommandBuffer& cmd_buf) {
+void draw_step_visualizer(StepVisualizerState& step_vis_state, CommandBuffer& cmd_buf) {
 	ImGui::BeginChild("BottomPanelRoot", ImVec2(0.0f, 0.0f), true, ImGuiWindowFlags_NoMove);
-	const AstNode* hovered_step_node = nullptr;
+	AstNode::ptr_t hovered_step_node;
 
 	if (step_vis_state.alg_state.steps.empty()) {
-		step_vis_state.hovered_step_node = nullptr;
+		step_vis_state.hovered_step_node.reset();
 		ImGui::TextDisabled("Шаги алгоритма отсутствуют");
 	    ImGui::EndChild();
 		return;
@@ -32,7 +29,7 @@ void DrawStepVisualizer(StepVisualizerState& step_vis_state, CommandBuffer& cmd_
 
 		if (ImGui::CollapsingHeader(("Шаг " + std::to_string(i + 1)).c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
 			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) && step.at) {
-				hovered_step_node = step.at.get();
+				hovered_step_node = step.at;
 			}
 			if (step.data.empty()) {
 				ImGui::TextDisabled("Пустой шаг");
@@ -51,12 +48,12 @@ void DrawStepVisualizer(StepVisualizerState& step_vis_state, CommandBuffer& cmd_
 				ImGui::TextUnformatted(step.data.c_str());
 				ImGui::PopTextWrapPos();
 				if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) && step.at) {
-					hovered_step_node = step.at.get();
+					hovered_step_node = step.at;
 				}
 				ImGui::EndChild();
 			}
 		} else if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) && step.at) {
-			hovered_step_node = step.at.get();
+			hovered_step_node = step.at;
 		}
 
 		ImGui::PopID();

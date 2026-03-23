@@ -13,28 +13,34 @@
 #include <Windows.h>
 #endif
 
-enum class flag_type { VALUE, BOOLEAN };
+enum class FlagType { VALUE, BOOLEAN };
 
-struct flag_data {
+struct FlagData {
     char flag_short;
     char flag_long[20];
     char msg[300];
-    flag_type type;
+    FlagType type;
 };
 
+template<size_t N, std::array<FlagData, N> Flags, size_t MinPosArgs, size_t MaxPosArgs>
+class FlagParser;
+
 template <size_t N>
-struct fixed_string {
+struct FixedString {
     char buf[N];
-    constexpr fixed_string(const char (&s)[N]) {
+    constexpr FixedString(const char (&s)[N]) {
         for (size_t i = 0; i < N; ++i) buf[i] = s[i];
     }
 };
 
-template<size_t N, std::array<flag_data, N> Flags>
-class console_arguments {
+template<size_t N, std::array<FlagData, N> Flags>
+class ConsoleArguments {
     std::array<bool, N> set_flags{};
     std::array<std::optional<std::string>, N> values{};
     std::vector<std::string> positional;
+
+    template<size_t NN, std::array<FlagData, NN> FF, size_t MinPosArgs, size_t MaxPosArgs>
+    friend class FlagParser;
 
     static constexpr std::optional<size_t> find_index(char flag_short) {
         for (size_t i = 0; i < N; ++i) {
@@ -51,7 +57,7 @@ class console_arguments {
         return std::nullopt;
     }
 
-public:
+private:
     void set(size_t index) {
         set_flags[index] = true;
     }
@@ -65,6 +71,8 @@ public:
         positional.push_back(std::move(value));
     }
 
+public:
+
     template<char Flag>
     constexpr bool is_flag_set() const {
         constexpr auto index = find_index(Flag);
@@ -72,7 +80,7 @@ public:
         return set_flags[*index];
     }
 
-    template<fixed_string FlagName>
+    template<FixedString FlagName>
     constexpr bool is_flag_set() const {
         constexpr std::string_view name{FlagName.buf, sizeof(FlagName.buf) - 1};
         constexpr auto index = find_index_long(name);
@@ -86,21 +94,21 @@ public:
         static_assert(index.has_value(), "Unknown flag");
         constexpr auto type = Flags[*index].type;
 
-        if constexpr (type == flag_type::VALUE) {
+        if constexpr (type == FlagType::VALUE) {
             return set_flags[*index] ? values[*index] : std::nullopt;
         } else {
             return set_flags[*index];
         }
     }
 
-    template<fixed_string FlagName>
+    template<FixedString FlagName>
     auto get_flag_value() const {
         constexpr std::string_view name{FlagName.buf, sizeof(FlagName.buf) - 1};
         constexpr auto index = find_index_long(name);
         static_assert(index.has_value(), "Unknown long flag");
         constexpr auto type = Flags[*index].type;
 
-        if constexpr (type == flag_type::VALUE) {
+        if constexpr (type == FlagType::VALUE) {
             return set_flags[*index] ? values[*index] : std::nullopt;
         } else {
             return set_flags[*index];
@@ -112,17 +120,17 @@ public:
     }
 };
 
-template<size_t N, std::array<flag_data, N> Flags>
-struct parse_result {
-    console_arguments<N, Flags> args;
+template<size_t N, std::array<FlagData, N> Flags>
+struct ParseResult {
+    ConsoleArguments<N, Flags> args;
     bool is_ok;
     std::string error_message;
 
     explicit operator bool() const noexcept { return is_ok; }
 };
 
-template<size_t N, std::array<flag_data, N> Flags, size_t MinPosArgs = 0, size_t MaxPosArgs = static_cast<size_t>(-1)>
-class flag_parser {
+template<size_t N, std::array<FlagData, N> Flags, size_t MinPosArgs = 0, size_t MaxPosArgs = static_cast<size_t>(-1)>
+class FlagParser {
     static constexpr std::optional<size_t> find_short(char f) {
         for(size_t i=0; i<N; ++i) {
             if(Flags[i].flag_short != '\0' && Flags[i].flag_short == f) return i;
@@ -137,7 +145,7 @@ class flag_parser {
         return std::nullopt;
     }
 public:
-    constexpr flag_parser() = default;
+    constexpr FlagParser() = default;
 
     std::string help_string(std::string_view program_name) const {
         std::ostringstream oss;
@@ -170,7 +178,7 @@ public:
                 oss << "--" << flag.flag_long;
             }
 
-            if (flag.type == flag_type::VALUE) {
+            if (flag.type == FlagType::VALUE) {
                 oss << " <значение>";
             }
             oss << "\n      " << flag.msg << "\n";
@@ -178,8 +186,8 @@ public:
         return oss.str();
     }
 
-    parse_result<N, Flags> process_args(int argc, char** argv) const noexcept {
-        console_arguments<N, Flags> result;
+    ParseResult<N, Flags> process_args(int argc, char** argv) const noexcept {
+        ConsoleArguments<N, Flags> result;
         try {
             for (int i = 1; i < argc; ++i) {
                 std::string_view arg = argv[i];
@@ -191,7 +199,7 @@ public:
                         return {result, false, "Неизвестный флаг: " + std::string(arg)};
                     }
                     
-                    if (Flags[*idx].type == flag_type::VALUE) {
+                    if (Flags[*idx].type == FlagType::VALUE) {
                         if (i + 1 < argc && static_cast<std::string_view>(argv[i+1]).find("-") != 0) {
                             result.set_value(*idx, std::string(argv[++i]));
                         } else {
@@ -207,7 +215,7 @@ public:
                         return {result, false, "Неизвестный флаг: " + std::string(arg)};
                     }
                     
-                    if (Flags[*idx].type == flag_type::VALUE) {
+                    if (Flags[*idx].type == FlagType::VALUE) {
                         if (i + 1 < argc && static_cast<std::string_view>(argv[i+1]).find("-") != 0) {
                             result.set_value(*idx, std::string(argv[++i]));
                         } else {
@@ -237,5 +245,5 @@ public:
 
 template<auto Flags, size_t MinPosArgs = 0, size_t MaxPosArgs = static_cast<size_t>(-1)>
 constexpr auto make_flag_parser() {
-    return flag_parser<Flags.size(), Flags, MinPosArgs, MaxPosArgs>{};
+    return FlagParser<Flags.size(), Flags, MinPosArgs, MaxPosArgs>{};
 }

@@ -2,12 +2,14 @@
 #ifndef RENDERER_H
 #define RENDERER_H
 
-struct RendererState;
-struct AppState;
+#include <string>
+
+struct RendererInternal;
+struct UiInitStruct;
 
 class Renderer {
 public:
-    Renderer(AppState& app_state);
+    Renderer(UiInitStruct& app_state);
 
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
@@ -17,15 +19,17 @@ public:
 
     ~Renderer();
 
-    bool InitCheck();
+    bool init_check();
 
-    bool ShouldQuit();
+    static void show_error(const std::string& message, const std::string& title = "Ошибка");
 
-    bool BeforeFrame();
-    void AfterFrame();
+    bool should_quit();
+
+    bool before_frame();
+    void after_frame();
 
 private:
-    RendererState* state;
+    RendererInternal* state;
 };
 
 #endif

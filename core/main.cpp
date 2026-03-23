@@ -197,7 +197,6 @@ public:
 template<typename Flags>
 bool check_flags(const Flags& flags) {
     return flags.template is_flag_set<'W'>() && flags.template is_flag_set<'M'>() ||
-           flags.template is_flag_set<'l'>() && flags.template is_flag_set<'h'>() ||
            flags.template is_flag_set<'f'>() && flags.get_positional().size() != 0;
 }
 
@@ -208,12 +207,10 @@ int main(int argc, char** argv) {
 #endif
 
     constexpr static std::array possible_flags { 
-        flag_data{'W', "algorithm_w", "Использовать алгоритм W для вывода типов (по умолчанию)", flag_type::BOOLEAN},
-        flag_data{'M', "algorithm_m", "Использовать алгоритм M для вывода типов", flag_type::BOOLEAN},
-        flag_data{'l', "lambda", "Использовать ввод в расширенном лямбда-исчислении (по умолчанию)", flag_type::BOOLEAN},
-        flag_data{'h', "haskell", "Использовать ввод на Haskell", flag_type::BOOLEAN},
-        flag_data{'g', "gui", "Открыть интерактивную версию вместо консольной", flag_type::BOOLEAN},
-        flag_data{'f', "file", "Режим ввода через файл. В качестве параметра должен передаваться путь. Несовместимо с передачей выражения как параметра", flag_type::VALUE}
+        FlagData{'W', "algorithm_w", "Использовать алгоритм W для вывода типов (по умолчанию)", FlagType::BOOLEAN},
+        FlagData{'M', "algorithm_m", "Использовать алгоритм M для вывода типов", FlagType::BOOLEAN},
+        FlagData{'g', "gui", "Открыть интерактивную версию вместо консольной", FlagType::BOOLEAN},
+        FlagData{'f', "file", "Режим ввода через файл. В качестве параметра должен передаваться путь. Несовместимо с передачей выражения как параметра", FlagType::VALUE}
     };
     constexpr auto flag_parser = make_flag_parser<possible_flags, 0, 1>();
     auto parse_res = flag_parser.process_args(argc, argv);

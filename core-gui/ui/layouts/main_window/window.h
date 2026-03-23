@@ -3,4 +3,4 @@
 
 struct MainWindowState;
 
-void DrawMainWindow(CommandBuffer& cmd_buf, MainWindowState& main_window);
+void draw_main_window(CommandBuffer& cmd_buf, MainWindowState& main_window);

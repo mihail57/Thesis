@@ -4,7 +4,7 @@
 #include <string>
 
 enum class TokenKind {
-    DATA, IDENTIFIER, LAMBDA, DOT, LET, EQUAL, IN, IF, THEN, ELSE, FIX, LPAREN, RPAREN, ERROR, EOF_T
+    DATA, IDENTIFIER, LAMBDA, DOT, LET, IN, IF, THEN, ELSE, FIX, LPAREN, RPAREN, ERROR, EOF_T
 };
 
 struct Token {
@@ -23,7 +23,7 @@ class TokenBuffer {
     Token current;
 
     enum class SymbolKind {
-        TEXT, NUM, QUOTE, LPAREN, RPAREN, INDENT, LAMBDA, DOT, EQUAL, OP_SYMBOL, ERROR
+        TEXT, NUM, QUOTE, LPAREN, RPAREN, INDENT, LAMBDA, DOT, OP_SYMBOL, ERROR
     };
 
     struct Symbol {
@@ -45,7 +45,7 @@ class TokenBuffer {
     Token next_token();
 
 public:
-    TokenBuffer(const std::string& target);
+    TokenBuffer(const std::string_view& target);
 
     const Token& front();
     void pop();

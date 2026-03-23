@@ -13,7 +13,7 @@ struct InferenceContextData {
 
 struct AlgorithmStep {
     std::string data;
-    std::shared_ptr<AstNode> at;
+    AstNode::ptr_t at;
 };
 
 struct AlgorithmState {

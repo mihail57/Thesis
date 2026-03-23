@@ -16,9 +16,9 @@
 #include "inference_manager_state.h"
 
 
-using Result = std::tuple<Type::base_ptr, Substitution>;
+using Result = std::tuple<Type::base_ptr_t, Substitution>;
 
-Type::base_ptr get_type(const Result& v);
+Type::base_ptr_t get_type(const Result& v);
 
 using ResultOrError = ValueOrError<Result>;
 
@@ -38,30 +38,30 @@ private:
 
     void reset();
 
-    void add_algorithm_step(const std::string& step_text, const std::shared_ptr<AstNode>& at);
+    void add_algorithm_step(const std::string& step_text, const AstNode::ptr_t& at);
 
-    SubstitutionOrError MGU(const std::shared_ptr<Type>& first, const std::shared_ptr<Type>& second);
+    SubstitutionOrError MGU(const Type::base_ptr_t& first, const Type::base_ptr_t& second);
 
-    ResultOrError W(TypingContext& gamma, std::shared_ptr<ConstNode> node);
-    ResultOrError W(TypingContext& gamma, std::shared_ptr<VarNode> node);
-    ResultOrError W(TypingContext& gamma, std::shared_ptr<FuncNode> node);
-    ResultOrError W(TypingContext& gamma, std::shared_ptr<AppNode> node);
-    ResultOrError W(TypingContext& gamma, std::shared_ptr<LetNode> node);
-    ResultOrError W(TypingContext& gamma, std::shared_ptr<BranchNode> node);
-    ResultOrError W(TypingContext& gamma, std::shared_ptr<FixNode> node);
-    ResultOrError W(TypingContext& gamma, std::shared_ptr<AstNode> node);
+    ResultOrError W(InferenceContext& gamma, ConstNode::ptr_t node);
+    ResultOrError W(InferenceContext& gamma, VarNode::ptr_t node);
+    ResultOrError W(InferenceContext& gamma, FuncNode::ptr_t node);
+    ResultOrError W(InferenceContext& gamma, AppNode::ptr_t node);
+    ResultOrError W(InferenceContext& gamma, LetNode::ptr_t node);
+    ResultOrError W(InferenceContext& gamma, BranchNode::ptr_t node);
+    ResultOrError W(InferenceContext& gamma, FixNode::ptr_t node);
+    ResultOrError W(InferenceContext& gamma, AstNode::ptr_t node);
 
-    SubstitutionOrError M(TypingContext& gamma, std::shared_ptr<ConstNode> node, Type::base_ptr expected);
-    SubstitutionOrError M(TypingContext& gamma, std::shared_ptr<VarNode> node, Type::base_ptr expected);
-    SubstitutionOrError M(TypingContext& gamma, std::shared_ptr<FuncNode> node, Type::base_ptr expected);
-    SubstitutionOrError M(TypingContext& gamma, std::shared_ptr<AppNode> node, Type::base_ptr expected);
-    SubstitutionOrError M(TypingContext& gamma, std::shared_ptr<LetNode> node, Type::base_ptr expected);
-    SubstitutionOrError M(TypingContext& gamma, std::shared_ptr<BranchNode> node, Type::base_ptr expected);
-    SubstitutionOrError M(TypingContext& gamma, std::shared_ptr<FixNode> node, Type::base_ptr expected);
-    SubstitutionOrError M(TypingContext& gamma, std::shared_ptr<AstNode> node, Type::base_ptr expected);
+    SubstitutionOrError M(InferenceContext& gamma, ConstNode::ptr_t node, Type::base_ptr_t expected);
+    SubstitutionOrError M(InferenceContext& gamma, VarNode::ptr_t node, Type::base_ptr_t expected);
+    SubstitutionOrError M(InferenceContext& gamma, FuncNode::ptr_t node, Type::base_ptr_t expected);
+    SubstitutionOrError M(InferenceContext& gamma, AppNode::ptr_t node, Type::base_ptr_t expected);
+    SubstitutionOrError M(InferenceContext& gamma, LetNode::ptr_t node, Type::base_ptr_t expected);
+    SubstitutionOrError M(InferenceContext& gamma, BranchNode::ptr_t node, Type::base_ptr_t expected);
+    SubstitutionOrError M(InferenceContext& gamma, FixNode::ptr_t node, Type::base_ptr_t expected);
+    SubstitutionOrError M(InferenceContext& gamma, AstNode::ptr_t node, Type::base_ptr_t expected);
 
     std::string highlight_loc(const std::string& source, const SourceLoc& loc);
-    TypingContext make_basic_context();
+    InferenceContext make_basic_context();
     std::string print_error(const Error& error, const std::string& source);
 };
 

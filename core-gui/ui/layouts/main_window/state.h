@@ -4,19 +4,13 @@
 
 #include "../expression_visualizer/state.h"
 #include "../step_visualizer/state.h"
-#include "app_state.h"
+#include "ui_init_struct.h"
 #include <array>
 #include <optional>
 
-enum class MainInputMode {
-	Text,
-	File
-};
-
 struct MainWindowState
 {
-	MainInputMode input_mode = MainInputMode::Text;
-	std::array<char, 2048> text_input{};
+	std::array<char, 2048> expression_input{};
 	std::array<char, 512> file_path{};
 
 	InputType input_type;
@@ -28,7 +22,7 @@ struct MainWindowState
 	
 	struct ImFont* monospace_font = nullptr;
 
-	MainWindowState(const AppState& app_state);
+	MainWindowState(const UiInitStruct& app_state);
 };
 
 #endif

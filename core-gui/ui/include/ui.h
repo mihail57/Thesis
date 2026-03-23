@@ -2,7 +2,7 @@
 #ifndef UI_H
 #define UI_H
 
-#include "app_state.h"
+#include "ui_init_struct.h"
 #include "event_buffer.h"
 #include "command_buffer.h"
 
@@ -10,7 +10,7 @@ struct UiState;
 
 class Ui {
 public:
-    Ui(const AppState& app_state, CommandBuffer& cmd_buf, EventBuffer& event_buf);
+    Ui(const UiInitStruct& app_state, CommandBuffer& cmd_buf, EventBuffer& event_buf);
 
     Ui(const Ui&) = delete;
     Ui& operator=(const Ui&) = delete;
@@ -20,8 +20,8 @@ public:
 
     ~Ui();
 
-    void DrawUi();
-    void HandleEvents();
+    void draw_ui();
+    void handle_events();
 
 private:
     UiState* state;

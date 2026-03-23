@@ -16,7 +16,7 @@ enum class InputType {
 struct InferenceManagerState {
     std::string input;
     std::string expression;
-    std::shared_ptr<AstNode> input_parsed;
+    AstNode::ptr_t input_parsed;
     InputType input_type;
     AlgorithmKind algorithm;
     AlgorithmState alg_state;

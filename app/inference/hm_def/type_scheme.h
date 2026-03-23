@@ -5,28 +5,34 @@
 #include "type.h"
 
 struct TypeScheme {
-    virtual std::shared_ptr<Type> instantiate() const = 0;
+    using ptr_t = std::shared_ptr<TypeScheme>;
+
+    virtual Type::base_ptr_t instantiate() const = 0;
     virtual std::string to_str() const = 0;
     virtual ~TypeScheme();
 };
 
 struct PolyTypeScheme : TypeScheme {
-    std::vector<std::shared_ptr<TypeVar>> binded_type_vars;
-    std::shared_ptr<Type> type_body;
+    using ptr_t = std::shared_ptr<PolyTypeScheme>;
 
-    PolyTypeScheme(const std::vector<std::shared_ptr<TypeVar>>& binded, const std::shared_ptr<Type>& body);
+    std::vector<TypeVar::ptr_t> binded_type_vars;
+    Type::base_ptr_t type_body;
+
+    PolyTypeScheme(const std::vector<TypeVar::ptr_t>& binded, const Type::base_ptr_t& body);
    
-    virtual std::shared_ptr<Type> instantiate() const;
+    virtual Type::base_ptr_t instantiate() const;
     virtual std::string to_str() const;
     ~PolyTypeScheme();
 };
 
 struct MonoTypeScheme : TypeScheme {
-    std::shared_ptr<Type> type;
+    using ptr_t = std::shared_ptr<MonoTypeScheme>;
 
-    MonoTypeScheme(std::shared_ptr<Type>& t);
+    Type::base_ptr_t type;
+
+    MonoTypeScheme(Type::base_ptr_t& t);
    
-    virtual std::shared_ptr<Type> instantiate() const;
+    virtual Type::base_ptr_t instantiate() const;
     virtual std::string to_str() const;
     ~MonoTypeScheme();
 };

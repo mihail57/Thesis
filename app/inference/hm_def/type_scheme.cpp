@@ -2,20 +2,24 @@
 #include "type_scheme.h"
 
 #include <sstream>
+#include <unordered_map>
 
 
 TypeScheme::~TypeScheme() {};
 
 
-PolyTypeScheme::PolyTypeScheme(const std::vector<std::shared_ptr<TypeVar>>& binded, const std::shared_ptr<Type>& body)
+PolyTypeScheme::PolyTypeScheme(const std::vector<TypeVar::ptr_t>& binded, const Type::base_ptr_t& body)
 : TypeScheme(), binded_type_vars(binded), type_body(body) {};
 
 
-std::shared_ptr<Type> PolyTypeScheme::instantiate() const {        
-    auto new_binded = std::vector<std::shared_ptr<TypeVar>>(binded_type_vars.size());
-    auto new_type_body = type_body->replace_vars(binded_type_vars, new_binded);
+Type::base_ptr_t PolyTypeScheme::instantiate() const {
+    std::unordered_map<std::string, TypeVar::ptr_t> replacements;
+    replacements.reserve(binded_type_vars.size());
+    for (const auto& binded : binded_type_vars) {
+        replacements.emplace(binded->name, TypeVar::ptr_t{});
+    }
 
-    return std::shared_ptr<Type>(new_type_body);
+    return type_body->replace_vars(replacements);
 }
 
 std::string PolyTypeScheme::to_str() const {
@@ -32,10 +36,10 @@ PolyTypeScheme::~PolyTypeScheme() {};
     
 
 
-MonoTypeScheme::MonoTypeScheme(std::shared_ptr<Type>& t) : TypeScheme(), type(t) {};
+MonoTypeScheme::MonoTypeScheme(Type::base_ptr_t& t) : TypeScheme(), type(t) {};
 
 
-std::shared_ptr<Type> MonoTypeScheme::instantiate() const {
+Type::base_ptr_t MonoTypeScheme::instantiate() const {
     return type;
 }
 

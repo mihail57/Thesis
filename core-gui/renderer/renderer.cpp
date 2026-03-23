@@ -1,6 +1,6 @@
 
 #include "renderer.h"
-#include "../../infrastructure/app_state.h"
+#include "../../infrastructure/ui_init_struct.h"
 
 #ifdef _WIN32
 #ifndef _CRT_SECURE_NO_WARNINGS
@@ -24,6 +24,7 @@
 #include <fstream>
 #include <cctype>
 #include <cstring>
+#include <iostream>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -33,7 +34,7 @@
 extern char** environ;
 #endif
 
-struct RendererState
+struct RendererInternal
 {        
     VkAllocationCallbacks*   g_Allocator        = VK_NULL_HANDLE;
     VkInstance               g_Instance         = VK_NULL_HANDLE;
@@ -57,17 +58,66 @@ struct RendererState
     ImVec4                   clear_color        = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 };
 
+#if defined(_WIN32)
+static std::wstring utf8_to_wide_char(const std::string& utf8_text)
+{
+    if (utf8_text.empty())
+        return std::wstring();
+
+    const int required_size = MultiByteToWideChar(
+        CP_UTF8,
+        0,
+        utf8_text.c_str(),
+        static_cast<int>(utf8_text.size()),
+        nullptr,
+        0
+    );
+    if (required_size <= 0)
+        return std::wstring();
+
+    std::wstring result(static_cast<size_t>(required_size), L'\0');
+    MultiByteToWideChar(
+        CP_UTF8,
+        0,
+        utf8_text.c_str(),
+        static_cast<int>(utf8_text.size()),
+        result.data(),
+        required_size
+    );
+    return result;
+}
+#endif
+
+void Renderer::show_error(const std::string& message, const std::string& title)
+{
+#ifdef _WIN32
+    std::wstring wmessage = utf8_to_wide_char(message);
+    if (wmessage.empty())
+        wmessage = L"Неизвестная ошибка";
+
+    std::wstring wtitle = utf8_to_wide_char(title);
+    if (wtitle.empty())
+        wtitle = L"Ошибка";
+
+    MessageBoxW(nullptr, wmessage.c_str(), wtitle.c_str(), MB_OK | MB_ICONERROR | MB_TASKMODAL);
+#else
+    std::cerr << title << ": " << message << std::endl;
+#endif
+}
+
 
 
 static void glfw_error_callback(int error, const char* description)
 {
-    fprintf(stderr, "GLFW Error %d: %s\n", error, description);
+    std::ostringstream out;
+    out << "GLFW Error " << error << ": " << (description != nullptr ? description : "(no description)");
+    Renderer::show_error(out.str(), "GLFW");
 }
 static void check_vk_result(VkResult err)
 {
     if (err == VK_SUCCESS)
         return;
-    fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
+    Renderer::show_error("[vulkan] Error: VkResult = " + std::to_string(static_cast<int>(err)), "Vulkan");
     if (err < 0)
         abort();
 }
@@ -81,7 +131,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_report(VkDebugReportFlagsEXT flags, 
 }
 #endif // APP_USE_VULKAN_DEBUG_REPORT
 
-static bool IsExtensionAvailable(const ImVector<VkExtensionProperties>& properties, const char* extension)
+static bool is_extension_available(const ImVector<VkExtensionProperties>& properties, const char* extension)
 {
     for (const VkExtensionProperties& p : properties)
         if (strcmp(p.extensionName, extension) == 0)
@@ -89,7 +139,7 @@ static bool IsExtensionAvailable(const ImVector<VkExtensionProperties>& properti
     return false;
 }
 
-static void SetupVulkan(RendererState* state, ImVector<const char*> instance_extensions)
+static void setup_vulkan(RendererInternal* state, ImVector<const char*> instance_extensions)
 {
     VkResult err;
 
@@ -107,10 +157,10 @@ static void SetupVulkan(RendererState* state, ImVector<const char*> instance_ext
         check_vk_result(err);
 
         // Enable required extensions
-        if (IsExtensionAvailable(properties, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
+        if (is_extension_available(properties, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
             instance_extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 #ifdef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
-        if (IsExtensionAvailable(properties, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME))
+        if (is_extension_available(properties, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME))
         {
             instance_extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
             create_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
@@ -165,7 +215,7 @@ static void SetupVulkan(RendererState* state, ImVector<const char*> instance_ext
         properties.resize(properties_count);
         vkEnumerateDeviceExtensionProperties(state->g_PhysicalDevice, nullptr, &properties_count, properties.Data);
 #ifdef VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
-        if (IsExtensionAvailable(properties, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME))
+        if (is_extension_available(properties, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME))
             device_extensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
 #endif
 
@@ -208,7 +258,7 @@ static void SetupVulkan(RendererState* state, ImVector<const char*> instance_ext
 
 // All the ImGui_ImplVulkanH_XXX structures/functions are optional helpers used by the demo.
 // Your real engine/app may not use them.
-static void SetupVulkanWindow(RendererState* state, VkSurfaceKHR surface, int width, int height)
+static void setup_vulkan_window(RendererInternal* state, VkSurfaceKHR surface, int width, int height)
 {
     ImGui_ImplVulkanH_Window* wd = &state->g_MainWindowData;
     // Check for WSI support
@@ -216,7 +266,7 @@ static void SetupVulkanWindow(RendererState* state, VkSurfaceKHR surface, int wi
     vkGetPhysicalDeviceSurfaceSupportKHR(state->g_PhysicalDevice, state->g_QueueFamily, surface, &res);
     if (res != VK_TRUE)
     {
-        fprintf(stderr, "Error no WSI support on physical device 0\n");
+        Renderer::show_error("Error no WSI support on physical device 0", "Vulkan");
         exit(-1);
     }
 
@@ -239,7 +289,7 @@ static void SetupVulkanWindow(RendererState* state, VkSurfaceKHR surface, int wi
     ImGui_ImplVulkanH_CreateOrResizeWindow(state->g_Instance, state->g_PhysicalDevice, state->g_Device, wd, state->g_QueueFamily, state->g_Allocator, width, height, state->g_MinImageCount, 0);
 }
 
-static void CleanupVulkan(RendererState* state)
+static void cleanup_vulkan(RendererInternal* state)
 {
     vkDestroyDescriptorPool(state->g_Device, state->g_DescriptorPool, state->g_Allocator);
 
@@ -253,13 +303,13 @@ static void CleanupVulkan(RendererState* state)
     vkDestroyInstance(state->g_Instance, state->g_Allocator);
 }
 
-static void CleanupVulkanWindow(RendererState* state)
+static void cleanup_vulkan_window(RendererInternal* state)
 {
     ImGui_ImplVulkanH_DestroyWindow(state->g_Instance, state->g_Device, &state->g_MainWindowData, state->g_Allocator);
     vkDestroySurfaceKHR(state->g_Instance, state->g_MainWindowData.Surface, state->g_Allocator);
 }
 
-static void FrameRender(RendererState* state, ImDrawData* draw_data)
+static void render_frame(RendererInternal* state, ImDrawData* draw_data)
 {
     ImGui_ImplVulkanH_Window* wd = &state->g_MainWindowData;
     VkSemaphore image_acquired_semaphore  = wd->FrameSemaphores[wd->SemaphoreIndex].ImageAcquiredSemaphore;
@@ -325,7 +375,7 @@ static void FrameRender(RendererState* state, ImDrawData* draw_data)
     }
 }
 
-static void FramePresent(RendererState* state)
+static void frame_present(RendererInternal* state)
 {
     ImGui_ImplVulkanH_Window* wd = &state->g_MainWindowData;
     if (state->g_SwapChainRebuild)
@@ -349,7 +399,7 @@ static void FramePresent(RendererState* state)
 }
     
 
-static float ComputeInitialFontSize(GLFWwindow* window) {
+static float calculate_font_size(GLFWwindow* window) {
     int window_w = 1280;
     int window_h = 800;
     if (window != nullptr)
@@ -360,7 +410,7 @@ static float ComputeInitialFontSize(GLFWwindow* window) {
     return std::clamp(base_size, 13.0f, 28.0f);
 }
 
-static std::optional<std::string> GetEnvironmentVariableValue(const char* name) {
+static std::optional<std::string> get_env_value(const char* name) {
 #if defined(_WIN32)
     DWORD size = GetEnvironmentVariableA(name, nullptr, 0);
     if (size == 0)
@@ -383,19 +433,19 @@ static std::optional<std::string> GetEnvironmentVariableValue(const char* name) 
 #endif
 }
 
-static std::string ToLowerCopy(std::string value) {
+static std::string to_lower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
         return static_cast<char>(std::tolower(c));
     });
     return value;
 }
 
-static std::optional<bool> TryDetectLinuxThemeFromGtkConfig() {
+static std::optional<bool> try_detect_linux_theme_from_gtk() {
 #if defined(__linux__)
     std::vector<std::filesystem::path> config_roots;
-    if (const auto xdg_config_home = GetEnvironmentVariableValue("XDG_CONFIG_HOME"))
+    if (const auto xdg_config_home = get_env_value("XDG_CONFIG_HOME"))
         config_roots.emplace_back(*xdg_config_home);
-    if (const auto home = GetEnvironmentVariableValue("HOME"))
+    if (const auto home = get_env_value("HOME"))
         config_roots.emplace_back(std::filesystem::path(*home) / ".config");
 
     for (const auto& root : config_roots) {
@@ -409,7 +459,7 @@ static std::optional<bool> TryDetectLinuxThemeFromGtkConfig() {
 
             std::string line;
             while (std::getline(in, line)) {
-                const std::string lower = ToLowerCopy(line);
+                const std::string lower = to_lower(line);
 
                 if (lower.find("gtk-application-prefer-dark-theme=1") != std::string::npos)
                     return true;
@@ -425,7 +475,7 @@ static std::optional<bool> TryDetectLinuxThemeFromGtkConfig() {
     return std::nullopt;
 }
 
-static std::optional<bool> DetectSystemDarkTheme() {
+static std::optional<bool> is_dark_system_theme() {
 #if defined(_WIN32)
     DWORD value = 1;
     DWORD value_size = sizeof(value);
@@ -444,28 +494,28 @@ static std::optional<bool> DetectSystemDarkTheme() {
 
     return std::nullopt;
 #elif defined(__linux__)
-    if (const auto gtk_theme_env = GetEnvironmentVariableValue("GTK_THEME")) {
-        const std::string lower = ToLowerCopy(*gtk_theme_env);
+    if (const auto gtk_theme_env = get_env_value("GTK_THEME")) {
+        const std::string lower = to_lower(*gtk_theme_env);
         if (lower.find("dark") != std::string::npos)
             return true;
         return false;
     }
 
-    return TryDetectLinuxThemeFromGtkConfig();
+    return try_detect_linux_theme_from_gtk();
 #else
     return std::nullopt;
 #endif
 }
 
-static void ApplySystemThemeOrLightFallback() {
-    const std::optional<bool> is_dark = DetectSystemDarkTheme();
+static void apply_system_theme() {
+    const std::optional<bool> is_dark = is_dark_system_theme();
     if (is_dark.has_value() && *is_dark)
         ImGui::StyleColorsDark();
     else
         ImGui::StyleColorsLight();
 }
 
-bool LoadImGuiSystemFontOnce(GLFWwindow* window) {
+bool load_main_font(GLFWwindow* window) {
     static bool loaded = false;
     if (loaded)
         return true;
@@ -475,7 +525,7 @@ bool LoadImGuiSystemFontOnce(GLFWwindow* window) {
     std::vector<std::string> candidates;
 
 #if defined(_WIN32)
-    const auto windir_env = GetEnvironmentVariableValue("WINDIR");
+    const auto windir_env = get_env_value("WINDIR");
     const std::string windir = windir_env.has_value() ? *windir_env : "C:\\Windows";
 
     candidates = {
@@ -492,7 +542,7 @@ bool LoadImGuiSystemFontOnce(GLFWwindow* window) {
     };
 #endif
 
-    const float font_size = ComputeInitialFontSize(window);
+    const float font_size = calculate_font_size(window);
 
     ImFont* loaded_font = nullptr;
     for (const std::string& path : candidates) {
@@ -512,11 +562,11 @@ bool LoadImGuiSystemFontOnce(GLFWwindow* window) {
     return loaded_font != nullptr;
 }
 
-std::string FindMonospaceFontPath() {
+std::string find_monospace_font() {
     std::vector<std::string> candidates;
 
 #if defined(_WIN32)
-    const auto windir_env = GetEnvironmentVariableValue("WINDIR");
+    const auto windir_env = get_env_value("WINDIR");
     const std::string windir = windir_env.has_value() ? *windir_env : "C:\\Windows";
 
     candidates = {
@@ -541,17 +591,17 @@ std::string FindMonospaceFontPath() {
     return "";
 }
 
-void SetupImGui(GLFWwindow* window, AppState& app_state) {
+void setup_imgui(GLFWwindow* window, UiInitStruct& app_state) {
     // Setup Dear ImGui style based on system preference when available.
-    ApplySystemThemeOrLightFallback();
-    LoadImGuiSystemFontOnce(window);
-    app_state.monospace_font_path = FindMonospaceFontPath();
-    app_state.font_size = ComputeInitialFontSize(window);
+    apply_system_theme();
+    load_main_font(window);
+    app_state.monospace_font_path = find_monospace_font();
+    app_state.font_size = calculate_font_size(window);
 }
 
 
-Renderer::Renderer(AppState& app_state) {
-    state = new RendererState();
+Renderer::Renderer(UiInitStruct& app_state) {
+    state = new RendererInternal();
 
     glfwSetErrorCallback(glfw_error_callback);
 #if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
@@ -560,18 +610,33 @@ Renderer::Renderer(AppState& app_state) {
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
     }
 #endif
-    if (!glfwInit())
+    if (!glfwInit()) {
+        Renderer::show_error("Failed to initialize GLFW", "GLFW");
+        delete state;
         state = nullptr;
+        return;
+    }
 
     // Create window with Vulkan context
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
     float main_scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor()); // Valid on GLFW 3.3+ only
     state->window = glfwCreateWindow((int)(1280 * main_scale), (int)(800 * main_scale), "Интерактивный вывод типов", nullptr, nullptr);
+    if (state->window == nullptr) {
+        Renderer::show_error("Failed to create GLFW window", "GLFW");
+        glfwTerminate();
+        delete state;
+        state = nullptr;
+        return;
+    }
     if (!glfwVulkanSupported())
     {
-        printf("GLFW: Vulkan Not Supported\n");
+        Renderer::show_error("GLFW: Vulkan Not Supported", "Vulkan");
+        glfwDestroyWindow(state->window);
+        glfwTerminate();
+        delete state;
         state = nullptr;
+        return;
     }
 
     ImVector<const char*> extensions;
@@ -579,7 +644,7 @@ Renderer::Renderer(AppState& app_state) {
     const char** glfw_extensions = glfwGetRequiredInstanceExtensions(&extensions_count);
     for (uint32_t i = 0; i < extensions_count; i++)
         extensions.push_back(glfw_extensions[i]);
-    SetupVulkan(state, extensions);
+    setup_vulkan(state, extensions);
 
     // Create Window Surface
     VkSurfaceKHR surface;
@@ -590,7 +655,7 @@ Renderer::Renderer(AppState& app_state) {
     int w, h;
     glfwGetFramebufferSize(state->window, &w, &h);
     ImGui_ImplVulkanH_Window* wd = &state->g_MainWindowData;
-    SetupVulkanWindow(state, surface, w, h);
+    setup_vulkan_window(state, surface, w, h);
 
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
@@ -618,7 +683,7 @@ Renderer::Renderer(AppState& app_state) {
     init_info.CheckVkResultFn = check_vk_result;
     ImGui_ImplVulkan_Init(&init_info);
 
-    SetupImGui(state->window, app_state);
+    setup_imgui(state->window, app_state);
 }
 
 Renderer::Renderer(Renderer&& other) noexcept : state(other.state) {
@@ -636,18 +701,18 @@ Renderer::~Renderer() {
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
-    CleanupVulkanWindow(state);
-    CleanupVulkan(state);
+    cleanup_vulkan_window(state);
+    cleanup_vulkan(state);
 
     glfwDestroyWindow(state->window);
     glfwTerminate();
 
     delete state;
 }
-bool Renderer::InitCheck() { return state != nullptr; }
-bool Renderer::ShouldQuit() { return glfwWindowShouldClose(state->window); }
+bool Renderer::init_check() { return state != nullptr; }
+bool Renderer::should_quit() { return glfwWindowShouldClose(state->window); }
 
-bool Renderer::BeforeFrame() {        
+bool Renderer::before_frame() {        
     glfwPollEvents();
 
     // Resize swap chain?
@@ -671,7 +736,7 @@ bool Renderer::BeforeFrame() {
 
     return true;
 }
-void Renderer::AfterFrame() {        
+void Renderer::after_frame() {        
     ImDrawData* draw_data = ImGui::GetDrawData();
     const bool is_minimized = (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);
     if (!is_minimized)
@@ -680,7 +745,7 @@ void Renderer::AfterFrame() {
         state->g_MainWindowData.ClearValue.color.float32[1] = state->clear_color.y * state->clear_color.w;
         state->g_MainWindowData.ClearValue.color.float32[2] = state->clear_color.z * state->clear_color.w;
         state->g_MainWindowData.ClearValue.color.float32[3] = state->clear_color.w;
-        FrameRender(state, draw_data);
-        FramePresent(state);
+        render_frame(state, draw_data);
+        frame_present(state);
     }
 }

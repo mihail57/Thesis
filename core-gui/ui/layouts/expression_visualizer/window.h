@@ -3,4 +3,4 @@
 
 struct ExpressionVisualizerState;
 
-void DrawExpressionVisualizer(ExpressionVisualizerState& state, CommandBuffer& cmd_buf);
+void draw_expression_visualizer(ExpressionVisualizerState& state, CommandBuffer& cmd_buf);

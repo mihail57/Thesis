@@ -21,7 +21,7 @@ struct UiState
 
     std::optional<UiEventDispatcher> dispatcher;
 
-    UiState(const AppState& app_state) : main_window_state(app_state) {}
+    UiState(const UiInitStruct& app_state) : main_window_state(app_state) {}
 
     void BuildDispatcher() {
         dispatcher.emplace(
@@ -32,22 +32,22 @@ struct UiState
     }
 };
 
-Ui::Ui(const AppState& app_state, CommandBuffer& cmd_buf, EventBuffer& event_buf) : cmd_buf(cmd_buf), event_buf(event_buf) {    
+Ui::Ui(const UiInitStruct& app_state, CommandBuffer& cmd_buf, EventBuffer& event_buf) : cmd_buf(cmd_buf), event_buf(event_buf) {    
     state = new UiState(app_state);
     state->BuildDispatcher();
 }
 
-void Ui::DrawUi() {
+void Ui::draw_ui() {
     ImGui::NewFrame();
 
-    DrawMainWindow(cmd_buf, state->main_window_state);
+    draw_main_window(cmd_buf, state->main_window_state);
     // static bool show = true;
     // ImGui::ShowDemoWindow(&show);
     
     ImGui::Render();
 }
 
-void Ui::HandleEvents() {
+void Ui::handle_events() {
     for(const auto& event : event_buf)
         std::visit(*state->dispatcher, event);
 

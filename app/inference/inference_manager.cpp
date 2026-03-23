@@ -9,7 +9,7 @@
 #include <format>
 
 
-Type::base_ptr get_type(const Result& v) { return std::get<0>(v); }
+Type::base_ptr_t get_type(const Result& v) { return std::get<0>(v); }
 
 
 bool InferenceManager::run_algorithm(bool detailed) {
@@ -24,13 +24,13 @@ bool InferenceManager::run_algorithm(bool detailed) {
     {
         auto ifstream = std::ifstream(state.input);
         state.expression = std::string(std::istreambuf_iterator<char>{ifstream}, {});
-        parsed = parse(state.expression);
+        parsed = LambdaParser(state.expression).parse();
         break;
     }
 
     case InputType::Text:
         state.expression = state.input;
-        parsed = parse(state.expression);
+        parsed = LambdaParser(state.expression).parse();
         break;
     
     default:
@@ -103,7 +103,7 @@ void InferenceManager::reset() {
     state.input_parsed.reset();
 }
 
-void InferenceManager::add_algorithm_step(const std::string& step_text, const std::shared_ptr<AstNode>& at) {
+void InferenceManager::add_algorithm_step(const std::string& step_text, const AstNode::ptr_t& at) {
     if(!detailed) return;
     state.alg_state.steps.push_back(AlgorithmStep{
         .data = step_text,
@@ -112,7 +112,7 @@ void InferenceManager::add_algorithm_step(const std::string& step_text, const st
 }
 
 
-static bool occurs_check(const std::shared_ptr<TypeVar>& var, const std::shared_ptr<Type>& type) {
+static bool occurs_check(const TypeVar::ptr_t& var, const Type::base_ptr_t& type) {
     if (auto t_var = std::dynamic_pointer_cast<TypeVar>(type)) {
         return t_var->name == var->name;
     } else if (auto t_func = std::dynamic_pointer_cast<FuncType>(type)) {
@@ -125,7 +125,7 @@ static bool occurs_check(const std::shared_ptr<TypeVar>& var, const std::shared_
     return false;
 }
 
-SubstitutionOrError InferenceManager::MGU(const std::shared_ptr<Type>& first, const std::shared_ptr<Type>& second) {
+SubstitutionOrError InferenceManager::MGU(const Type::base_ptr_t& first, const Type::base_ptr_t& second) {
     TypeStringifier ctx;
     if (auto f_var = std::dynamic_pointer_cast<TypeVar>(first)) {
         if (auto s_var = std::dynamic_pointer_cast<TypeVar>(second)) {
@@ -201,8 +201,8 @@ SubstitutionOrError InferenceManager::MGU(const std::shared_ptr<Type>& first, co
 }
 
 ResultOrError InferenceManager::W(
-    TypingContext& gamma,
-    std::shared_ptr<ConstNode> node
+    InferenceContext& gamma,
+    ConstNode::ptr_t node
 ) {
     add_algorithm_step(
         std::format("Тип константного выражения {}: {}", node->value, node->type),
@@ -213,8 +213,8 @@ ResultOrError InferenceManager::W(
 }
 
 ResultOrError InferenceManager::W(
-    TypingContext& gamma,
-    std::shared_ptr<VarNode> node
+    InferenceContext& gamma,
+    VarNode::ptr_t node
 ) {
     auto sub = Substitution::make_identity();
     if(!gamma.has(node->var)) {
@@ -226,7 +226,7 @@ ResultOrError InferenceManager::W(
         return Error{.text = "неизвестная типовая переменная " + node->var, .at = node->loc};
     }
         
-    std::shared_ptr<TypeScheme> scheme = gamma.get(node->var).second;
+    TypeScheme::ptr_t scheme = gamma.get(node->var).second;
     auto inst = scheme->instantiate();
     
     add_algorithm_step(
@@ -238,16 +238,16 @@ ResultOrError InferenceManager::W(
 }
 
 ResultOrError InferenceManager::W(
-    TypingContext& gamma,
-    std::shared_ptr<FuncNode> node
+    InferenceContext& gamma,
+    FuncNode::ptr_t node
 ) {
     auto beta = TypeVar::generate_fresh();
     auto beta_upcasted = std::static_pointer_cast<Type>(beta);
-    auto beta_ts = std::shared_ptr<TypeScheme>(new PolyTypeScheme(
-        std::vector<std::shared_ptr<TypeVar>> { },
+    auto beta_ts = PolyTypeScheme::ptr_t(new PolyTypeScheme(
+        std::vector<TypeVar::ptr_t> { },
         beta_upcasted
     ));
-    auto new_ctx = TypingContext(gamma).with(
+    auto new_ctx = InferenceContext(gamma).with(
         node->param->var,
         beta_ts
     );
@@ -271,7 +271,7 @@ ResultOrError InferenceManager::W(
 
     auto arg_type = s_1.apply_to(beta_upcasted);
     auto body_type = t_1;
-    auto result_type = std::shared_ptr<Type>(new FuncType(arg_type, body_type));
+    auto result_type = FuncType::ptr_t(new FuncType(arg_type, body_type));
 
     add_algorithm_step(
         std::format(
@@ -291,8 +291,8 @@ ResultOrError InferenceManager::W(
 }
 
 ResultOrError InferenceManager::W(
-    TypingContext& gamma,
-    std::shared_ptr<AppNode> node
+    InferenceContext& gamma,
+    AppNode::ptr_t node
 ) {
     auto res_1 = W(gamma, node->func);
 
@@ -302,7 +302,7 @@ ResultOrError InferenceManager::W(
 
     auto [t_1, s_1] = res_1.unwrap();
 
-    TypingContext new_ctx = s_1.apply_to(gamma);
+    InferenceContext new_ctx = s_1.apply_to(gamma);
     auto res_2 = W(new_ctx, node->arg);
 
     if(res_2.is_error()) {
@@ -347,8 +347,8 @@ ResultOrError InferenceManager::W(
 }
 
 ResultOrError InferenceManager::W(
-    TypingContext& gamma,
-    std::shared_ptr<LetNode> node
+    InferenceContext& gamma,
+    LetNode::ptr_t node
 ) {
     add_algorithm_step(
         "Вычислим тип и подстановку для значения привязки",
@@ -362,7 +362,7 @@ ResultOrError InferenceManager::W(
     }
     auto [t_1, s_1] = res_1.unwrap();
 
-    TypingContext new_ctx = s_1.apply_to(gamma);
+    InferenceContext new_ctx = s_1.apply_to(gamma);
     auto t_1_gen = new_ctx.generalize(t_1);
     new_ctx.set(node->bind_var->var, t_1_gen);
     
@@ -402,8 +402,8 @@ ResultOrError InferenceManager::W(
 }
 
 ResultOrError InferenceManager::W(
-    TypingContext& gamma,
-    std::shared_ptr<BranchNode> node
+    InferenceContext& gamma,
+    BranchNode::ptr_t node
 ) {
     auto res_1 = W(gamma, node->cond_expr);
 
@@ -421,7 +421,7 @@ ResultOrError InferenceManager::W(
     auto s_2 = res_2.unwrap();
     auto s_2_1 = s_2 + s_1;
 
-    TypingContext new_ctx = s_2_1.apply_to(gamma);
+    InferenceContext new_ctx = s_2_1.apply_to(gamma);
     auto res_3 = W(new_ctx, node->true_expr);
     if(res_3.is_error()) {
         return res_3;
@@ -464,8 +464,8 @@ ResultOrError InferenceManager::W(
 }
 
 ResultOrError InferenceManager::W(
-    TypingContext& gamma,
-    std::shared_ptr<FixNode> node
+    InferenceContext& gamma,
+    FixNode::ptr_t node
 ) {
     auto res_1 = W(gamma, node->func);
 
@@ -502,8 +502,8 @@ ResultOrError InferenceManager::W(
 }
 
 ResultOrError InferenceManager::W(
-    TypingContext& gamma,
-    std::shared_ptr<AstNode> node
+    InferenceContext& gamma,
+    AstNode::ptr_t node
 ) {
     if(auto const_node = std::dynamic_pointer_cast<ConstNode>(node))
         return W(gamma, const_node);
@@ -525,9 +525,9 @@ ResultOrError InferenceManager::W(
 
 
 SubstitutionOrError InferenceManager::M(
-    TypingContext& gamma, 
-    std::shared_ptr<ConstNode> node, 
-    Type::base_ptr expected
+    InferenceContext& gamma, 
+    ConstNode::ptr_t node,
+    Type::base_ptr_t expected
 ) {
     auto const_type = make_const_type(node->type);
     auto result = MGU(expected, const_type);
@@ -553,12 +553,12 @@ SubstitutionOrError InferenceManager::M(
     return result;
 }
 
-SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<VarNode> node, Type::base_ptr expected) {
+SubstitutionOrError InferenceManager::M(InferenceContext& gamma, VarNode::ptr_t node, Type::base_ptr_t expected) {
     if(!gamma.has(node->var)) {
         return Error{.text = "неизвестная типовая переменная " + node->var, .at = node->loc};
     }
         
-    std::shared_ptr<TypeScheme> scheme = gamma.get(node->var).second;
+    TypeScheme::ptr_t scheme = gamma.get(node->var).second;
     auto inst = scheme->instantiate();
     auto result = MGU(expected, inst);
 
@@ -586,7 +586,7 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Va
     return result;
 }
 
-SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<FuncNode> node, Type::base_ptr expected) {
+SubstitutionOrError InferenceManager::M(InferenceContext& gamma, FuncNode::ptr_t node, Type::base_ptr_t expected) {
     auto b_1 = TypeVar::generate_fresh(), b_2 = TypeVar::generate_fresh();
     auto func_type = make_func_type(b_1, b_2);
     auto result_1 = MGU(expected, func_type);
@@ -601,7 +601,7 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Fu
     auto s_1_b_1 = s_1.apply_to(b_1);
     auto new_ctx = s_1.apply_to(gamma).with(
         node->param->var, 
-        std::shared_ptr<TypeScheme>(new PolyTypeScheme(
+        PolyTypeScheme::ptr_t(new PolyTypeScheme(
             { },
             s_1_b_1
         ))
@@ -632,7 +632,7 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Fu
     return result_sub;
 }
 
-SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<AppNode> node, Type::base_ptr expected) {
+SubstitutionOrError InferenceManager::M(InferenceContext& gamma, AppNode::ptr_t node, Type::base_ptr_t expected) {
     auto beta = TypeVar::generate_fresh();
     auto result_1 = M(gamma, node->func, make_func_type(beta, expected));
 
@@ -664,7 +664,7 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Ap
     return s_2 + s_1;
 }
 
-SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<LetNode> node, Type::base_ptr expected) {
+SubstitutionOrError InferenceManager::M(InferenceContext& gamma, LetNode::ptr_t node, Type::base_ptr_t expected) {
     auto beta = TypeVar::generate_fresh();
     auto result_1 = M(gamma, node->bind_value, beta);
 
@@ -700,7 +700,7 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Le
     return s_2 + s_1;
 }
 
-SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<BranchNode> node, Type::base_ptr expected) {
+SubstitutionOrError InferenceManager::M(InferenceContext& gamma, BranchNode::ptr_t node, Type::base_ptr_t expected) {
     auto result_1 = M(gamma, node->cond_expr, make_const_type("Bool"));
     if(result_1.is_error()) {
         return result_1;
@@ -729,7 +729,7 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Br
     return s_3 + s_2 + s_1;
 }
 
-SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<FixNode> node, Type::base_ptr expected) {    
+SubstitutionOrError InferenceManager::M(InferenceContext& gamma, FixNode::ptr_t node, Type::base_ptr_t expected) {
     auto beta = TypeVar::generate_fresh();
     auto func = make_func_type(beta, beta);
     
@@ -752,9 +752,9 @@ SubstitutionOrError InferenceManager::M(TypingContext& gamma, std::shared_ptr<Fi
 }
 
 SubstitutionOrError InferenceManager::M(
-    TypingContext& gamma, 
-    std::shared_ptr<AstNode> node, 
-    Type::base_ptr expected
+    InferenceContext& gamma, 
+    AstNode::ptr_t node,
+    Type::base_ptr_t expected
 ) {
     if(auto const_node = std::dynamic_pointer_cast<ConstNode>(node))
         return M(gamma, const_node, expected);
@@ -788,44 +788,111 @@ std::string InferenceManager::highlight_loc(const std::string& source, const Sou
     return ss.str();
 }
 
-TypingContext InferenceManager::make_basic_context() {    
-    auto list_identifier = _make_type_var("List");
+InferenceContext InferenceManager::make_basic_context() {    
+    auto list_identifier = make_type_var("List");
     auto param = TypeVar::generate_fresh();
     auto list = make_type_constructor(list_identifier, { param });
-    auto nil = std::shared_ptr<TypeScheme>(new PolyTypeScheme(
+    auto int_type = make_const_type("Int");
+    auto bool_type = make_const_type("Bool");
+
+    auto nil = PolyTypeScheme::ptr_t(new PolyTypeScheme(
         { param },
         list
     )); //∀α. List α
-    auto cons = std::shared_ptr<TypeScheme>(new PolyTypeScheme(
+    auto cons = PolyTypeScheme::ptr_t(new PolyTypeScheme(
         { param },
         make_func_type(param, make_func_type(list, list))
     )); //∀α. α -> List α -> List α
-    auto bool_type = make_const_type("Bool");
-    auto equal = std::shared_ptr<TypeScheme>(new PolyTypeScheme(
+
+    auto equal = PolyTypeScheme::ptr_t(new PolyTypeScheme(
         { param },
         make_func_type(param, make_func_type(param, bool_type))
     )); //∀α. α -> α -> Bool
 
-    auto hd = std::shared_ptr<TypeScheme>(new PolyTypeScheme(
+    auto hd = PolyTypeScheme::ptr_t(new PolyTypeScheme(
         { param },
         make_func_type(list, param)
     )); //∀α. List α -> α
-    auto tl = std::shared_ptr<TypeScheme>(new PolyTypeScheme(
+    auto tl = PolyTypeScheme::ptr_t(new PolyTypeScheme(
         { param },
         make_func_type(list, list)
     )); //∀α. List α -> List α
 
+    auto add = PolyTypeScheme::ptr_t(new PolyTypeScheme(
+        {},
+        make_func_type(int_type, make_func_type(int_type, int_type))
+    )); // Int -> Int -> Int
+    auto sub = PolyTypeScheme::ptr_t(new PolyTypeScheme(
+        {},
+        make_func_type(int_type, make_func_type(int_type, int_type))
+    )); // Int -> Int -> Int
+    auto mul = PolyTypeScheme::ptr_t(new PolyTypeScheme(
+        {},
+        make_func_type(int_type, make_func_type(int_type, int_type))
+    )); // Int -> Int -> Int
+    auto div = PolyTypeScheme::ptr_t(new PolyTypeScheme(
+        {},
+        make_func_type(int_type, make_func_type(int_type, int_type))
+    )); // Int -> Int -> Int
+
+    auto and_fn = PolyTypeScheme::ptr_t(new PolyTypeScheme(
+        {},
+        make_func_type(bool_type, make_func_type(bool_type, bool_type))
+    )); // Bool -> Bool -> Bool
+    auto or_fn = PolyTypeScheme::ptr_t(new PolyTypeScheme(
+        {},
+        make_func_type(bool_type, make_func_type(bool_type, bool_type))
+    )); // Bool -> Bool -> Bool
+    auto not_fn = PolyTypeScheme::ptr_t(new PolyTypeScheme(
+        {},
+        make_func_type(bool_type, bool_type)
+    )); // Bool -> Bool
+    auto and_op = PolyTypeScheme::ptr_t(new PolyTypeScheme(
+        {},
+        make_func_type(bool_type, make_func_type(bool_type, bool_type))
+    )); // Bool -> Bool -> Bool
+    auto or_op = PolyTypeScheme::ptr_t(new PolyTypeScheme(
+        {},
+        make_func_type(bool_type, make_func_type(bool_type, bool_type))
+    )); // Bool -> Bool -> Bool
+    auto not_op = PolyTypeScheme::ptr_t(new PolyTypeScheme(
+        {},
+        make_func_type(bool_type, bool_type)
+    )); // Bool -> Bool
+
     auto nil_id = make_var_node("[]", SourceLoc());
     auto cons_id = make_var_node("::", SourceLoc());
     auto equal_id = make_var_node("equal", SourceLoc());
+    auto eq_op_id = make_var_node("=", SourceLoc());
     auto hd_id = make_var_node("hd", SourceLoc());
     auto tl_id = make_var_node("tl", SourceLoc());
-    TypingContext tctx;
+    auto add_id = make_var_node("+", SourceLoc());
+    auto sub_id = make_var_node("-", SourceLoc());
+    auto mul_id = make_var_node("*", SourceLoc());
+    auto div_id = make_var_node("/", SourceLoc());
+    auto and_id = make_var_node("and", SourceLoc());
+    auto or_id = make_var_node("or", SourceLoc());
+    auto not_id = make_var_node("not", SourceLoc());
+    auto and_op_id = make_var_node("&&", SourceLoc());
+    auto or_op_id = make_var_node("||", SourceLoc());
+    auto not_op_id = make_var_node("!", SourceLoc());
+    InferenceContext tctx;
     tctx.set(nil_id->var, nil);
     tctx.set(cons_id->var, cons);
     tctx.set(equal_id->var, equal);
+    tctx.set(eq_op_id->var, equal);
     tctx.set(hd_id->var, hd);
     tctx.set(tl_id->var, tl);
+    tctx.set(add_id->var, add);
+    tctx.set(sub_id->var, sub);
+    tctx.set(mul_id->var, mul);
+    tctx.set(div_id->var, div);
+    tctx.set(and_id->var, and_fn);
+    tctx.set(or_id->var, or_fn);
+    tctx.set(not_id->var, not_fn);
+    tctx.set(and_op_id->var, and_op);
+    tctx.set(or_op_id->var, or_op);
+    tctx.set(not_op_id->var, not_op);
 
     return tctx;
 }

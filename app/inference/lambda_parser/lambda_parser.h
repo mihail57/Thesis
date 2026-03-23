@@ -4,10 +4,16 @@
 
 #include "ast_def.h"
 #include "../value_or_error.hpp"
-#include <variant>
+#include "token_buffer.h"
 
-using NodeOrError = ValueOrError<std::shared_ptr<AstNode>>;
+using NodeOrError = ValueOrError<AstNode::ptr_t>;
 
-NodeOrError parse(const std::string& source);
+struct LambdaParser {
+    TokenBuffer lexer;
+
+    LambdaParser(const std::string_view& expression);
+
+    NodeOrError parse();
+};
 
 #endif

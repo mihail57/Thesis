@@ -5,36 +5,38 @@
 #include <algorithm>
 
 
-bool TypingContext::has(const std::string& var) {
+bool InferenceContext::has(const std::string& var) {
     return _context.find(var) != end();
 }
 
-TypingContext::context_pair& TypingContext::get(const std::string& var) {
+InferenceContext::context_pair& InferenceContext::get(const std::string& var) {
     return *_context.find(var);
 }
 
-void TypingContext::set(const context_pair::first_type& var, const context_pair::second_type& scheme) {
+void InferenceContext::set(const context_pair::first_type& var, const context_pair::second_type& scheme) {
     _context.insert(std::make_pair(var, scheme));
 }
 
-TypingContext TypingContext::with(const context_pair::first_type& var, const context_pair::second_type& scheme) {
-    auto new_ctx = TypingContext(*this);
+InferenceContext InferenceContext::with(const context_pair::first_type& var, const context_pair::second_type& scheme) {
+    auto new_ctx = InferenceContext(*this);
     new_ctx.set(var, scheme);
     return new_ctx;
 }
 
-std::shared_ptr<TypeScheme> TypingContext::generalize(std::shared_ptr<Type>& type) {
-    std::vector<std::shared_ptr<TypeVar>> type_vars;
+TypeScheme::ptr_t InferenceContext::generalize(Type::base_ptr_t& type) {
+    // 1. FV(t)
+    std::vector<TypeVar::ptr_t> type_vars;
     type->get_vars(type_vars);
 
+    // 2. FV(Gamma)
     std::unordered_set<std::string> ctx_free_vars;
 
     for(const auto& ctx_pair: *this) {
-        std::vector<std::shared_ptr<TypeVar>> ctx_term_fvs;
+        std::vector<TypeVar::ptr_t> ctx_term_fvs;
         if(auto mono = std::dynamic_pointer_cast<MonoTypeScheme>(ctx_pair.second))
             mono->type->get_vars(ctx_term_fvs);
         else if(auto poly = std::dynamic_pointer_cast<PolyTypeScheme>(ctx_pair.second)){
-            std::vector<std::shared_ptr<TypeVar>> ctx_term_all_tvs;
+            std::vector<TypeVar::ptr_t> ctx_term_all_tvs;
             poly->type_body->get_vars(ctx_term_all_tvs);
 
             ctx_term_fvs.reserve(ctx_term_all_tvs.size());
@@ -42,7 +44,7 @@ std::shared_ptr<TypeScheme> TypingContext::generalize(std::shared_ptr<Type>& typ
                 if(!std::any_of(
                     poly->binded_type_vars.cbegin(),
                     poly->binded_type_vars.cend(),
-                    [ctx_term_tv](const TypeVar::ptr& binded_tv) { return ctx_term_tv->name == binded_tv->name; }
+                    [ctx_term_tv](const TypeVar::ptr_t& binded_tv) { return ctx_term_tv->name == binded_tv->name; }
                 ))
                     ctx_term_fvs.push_back(ctx_term_tv);
             }
@@ -52,7 +54,8 @@ std::shared_ptr<TypeScheme> TypingContext::generalize(std::shared_ptr<Type>& typ
             ctx_free_vars.insert(ctx_term_fv->name);
     }
 
-    std::vector<std::shared_ptr<TypeVar>> new_binded;
+    // 3. FV(t) - FV(Gamma)
+    std::vector<TypeVar::ptr_t> new_binded;
     new_binded.reserve(type_vars.size());
 
     for(const auto& tv : type_vars) {
@@ -60,7 +63,5 @@ std::shared_ptr<TypeScheme> TypingContext::generalize(std::shared_ptr<Type>& typ
             new_binded.push_back(tv);
     }
 
-    return std::shared_ptr<TypeScheme>(
-        new PolyTypeScheme(new_binded, type)
-    );
+    return PolyTypeScheme::ptr_t(new PolyTypeScheme(new_binded, type));
 }

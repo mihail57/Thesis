@@ -4,8 +4,6 @@
 
 #include "ast_def.h"
 
-#include "string_to_buffer.hpp"
-
 #include "imgui.h"
 
 #include <memory>
@@ -19,22 +17,35 @@ constexpr float k_ast_vertical_spacing = 44.0f;
 constexpr float k_ast_canvas_padding = 16.0f;
 
 void ExpressionVisualizerState::reset() {
-	root.reset();
+	ast_root.reset();
 	selected_ast_node = -1;
-	pending_source_highlight = false;
-	clear_source_selection_only = false;
 	highlight_start = 0;
 	highlight_end = 0;
-	CopyStringToBuffer(ast_source_copy, "");
+	expression = std::nullopt;
 }
 
-void ExpressionVisualizerState::set_expression(const std::string& expr) {
-	CopyStringToBuffer(ast_source_copy, expr);
+void ExpressionVisualizerState::set_expression(std::string_view expr) {
+	expression = expr;
+}
+
+void ExpressionVisualizerState::request_source_highlight(const SourceLoc& loc) {
+	const int text_len = expression.has_value() ? static_cast<int>(expression->size()) : 0;
+	int start_idx = std::clamp(static_cast<int>(loc.start), 0, text_len);
+	int end_idx = std::clamp(static_cast<int>(loc.end), 0, text_len);
+	if (start_idx > end_idx) {
+		std::swap(start_idx, end_idx);
+	}
+	if (start_idx == end_idx && end_idx < text_len) {
+		++end_idx;
+	}
+
+	highlight_start = start_idx;
+	highlight_end = end_idx;
 }
 
 
 struct AstVisualNode {
-	std::shared_ptr<AstNode> source_node;
+	AstNode::ptr_t source_node;
 	std::string title;
 	std::vector<std::string> details;
 	std::vector<int> children;
@@ -46,10 +57,10 @@ struct AstVisualNode {
 	ImU32 title_color = IM_COL32(220, 225, 245, 255);
 };
 
-int BuildAstVisualTree(const std::shared_ptr<AstNode>& node, std::vector<AstVisualNode>& out_nodes) {
+static int build_ast_visualization_data(const AstNode::ptr_t& node, std::vector<AstVisualNode>& out_nodes) {
 	AstVisualNode visual_node;
 	visual_node.source_node = node;
-	std::vector<std::shared_ptr<AstNode>> child_nodes;
+	std::vector<AstNode::ptr_t> child_nodes;
 
 	if (!node) {
 		visual_node.title = "Null";
@@ -110,8 +121,8 @@ int BuildAstVisualTree(const std::shared_ptr<AstNode>& node, std::vector<AstVisu
 	const int node_index = static_cast<int>(out_nodes.size());
 	out_nodes.push_back(std::move(visual_node));
 
-	for (const std::shared_ptr<AstNode>& child : child_nodes) {
-		const int child_index = BuildAstVisualTree(child, out_nodes);
+	for (const AstNode::ptr_t& child : child_nodes) {
+		const int child_index = build_ast_visualization_data(child, out_nodes);
 		out_nodes[node_index].children.push_back(child_index);
 	}
 
@@ -122,30 +133,7 @@ int BuildAstVisualTree(const std::shared_ptr<AstNode>& node, std::vector<AstVisu
 	return node_index;
 }
 
-void ExpressionVisualizerState::request_source_highlight(const SourceLoc& loc) {
-	const int text_len = static_cast<int>(std::strlen(ast_source_copy.data()));
-	int start_idx = std::clamp(static_cast<int>(loc.start), 0, text_len);
-	int end_idx = std::clamp(static_cast<int>(loc.end), 0, text_len);
-	if (start_idx > end_idx) {
-		std::swap(start_idx, end_idx);
-	}
-	if (start_idx == end_idx && end_idx < text_len) {
-		++end_idx;
-	}
-
-	highlight_start = start_idx;
-	highlight_end = end_idx;
-	pending_source_highlight = true;
-	clear_source_selection_only = false;
-}
-
-void ExpressionVisualizerState::clear_source_highlight() {
-	pending_source_highlight = true;
-	clear_source_selection_only = true;
-}
-
-
-void CalculateAstNodeSize(AstVisualNode& node) {
+static void calculate_node_size(AstVisualNode& node) {
 	const float line_height = ImGui::GetTextLineHeight();
 	float max_text_width = ImGui::CalcTextSize(node.title.c_str()).x;
 	for (const std::string& detail : node.details) {
@@ -162,7 +150,7 @@ void CalculateAstNodeSize(AstVisualNode& node) {
 	node.size.y = std::max(min_height, lines_count * line_height + vertical_padding);
 }
 
-float CalculateSubtreeWidth(int node_index, std::vector<AstVisualNode>& nodes) {
+static float calculate_subtree_width(int node_index, std::vector<AstVisualNode>& nodes) {
 	AstVisualNode& node = nodes[node_index];
 	if (node.children.empty()) {
 		node.subtree_width = node.size.x;
@@ -171,7 +159,7 @@ float CalculateSubtreeWidth(int node_index, std::vector<AstVisualNode>& nodes) {
 
 	float children_width = 0.0f;
 	for (size_t i = 0; i < node.children.size(); ++i) {
-		children_width += CalculateSubtreeWidth(node.children[i], nodes);
+		children_width += calculate_subtree_width(node.children[i], nodes);
 		if (i + 1 < node.children.size()) {
 			children_width += k_ast_horizontal_spacing;
 		}
@@ -181,7 +169,7 @@ float CalculateSubtreeWidth(int node_index, std::vector<AstVisualNode>& nodes) {
 	return node.subtree_width;
 }
 
-void PlaceAstNodes(
+static void place_nodes(
 	int node_index,
 	std::vector<AstVisualNode>& nodes,
 	std::vector<ImVec2>& positions,
@@ -205,38 +193,35 @@ void PlaceAstNodes(
 
 	float child_left = left + (node.subtree_width - total_children_width) * 0.5f;
 	for (const int child_index : node.children) {
-		PlaceAstNodes(child_index, nodes, positions, child_left, top + node.size.y + k_ast_vertical_spacing);
+		place_nodes(child_index, nodes, positions, child_left, top + node.size.y + k_ast_vertical_spacing);
 		child_left += nodes[child_index].subtree_width + k_ast_horizontal_spacing;
 	}
 }
 
-void DrawAstGraph(ExpressionVisualizerState& main_window, const std::shared_ptr<AstNode>& root_node) {
+static void draw_ast_visualizer(ExpressionVisualizerState& state) {
+	const auto& root_node = state.ast_root;
+
 	if (!root_node) {
 		ImGui::TextDisabled("AST пока не построено");
 		return;
 	}
 
-	float zoom = main_window.ast_zoom;
+	float zoom = state.zoom_factor;
 	zoom = std::clamp(zoom, 0.4f, 1.0f);
-
-	ImGui::TextDisabled("Ctrl + колесо: масштаб");
-	ImGui::SameLine();
-	ImGui::Text("x%.2f", zoom);
-	ImGui::SameLine();
-	ImGui::TextDisabled("ЛКМ + перетаскивание: панорама");
+	const float helper_area_height = ImGui::GetTextLineHeightWithSpacing() * 2.0f;
 
 	std::vector<AstVisualNode> nodes;
-	const int root_index = BuildAstVisualTree(root_node, nodes);
+	const int root_index = build_ast_visualization_data(root_node, nodes);
 	for (AstVisualNode& node : nodes) {
-		CalculateAstNodeSize(node);
+		calculate_node_size(node);
 		node.size.x *= zoom;
 		node.size.y *= zoom;
 	}
 
-	CalculateSubtreeWidth(root_index, nodes);
+	calculate_subtree_width(root_index, nodes);
 
 	std::vector<ImVec2> positions(nodes.size());
-	PlaceAstNodes(root_index, nodes, positions, k_ast_canvas_padding, k_ast_canvas_padding);
+	place_nodes(root_index, nodes, positions, k_ast_canvas_padding, k_ast_canvas_padding);
 
 	float canvas_width = 0.0f;
 	float canvas_height = 0.0f;
@@ -245,21 +230,21 @@ void DrawAstGraph(ExpressionVisualizerState& main_window, const std::shared_ptr<
 		canvas_height = std::max(canvas_height, positions[i].y + nodes[i].size.y + k_ast_canvas_padding);
 	}
 
-	ImGui::BeginChild("AstCanvas", ImVec2(0.0f, 0.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
+	ImGui::BeginChild("AstCanvas", ImVec2(0.0f, -helper_area_height), true, ImGuiWindowFlags_HorizontalScrollbar);
 	if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) && ImGui::GetIO().KeyCtrl) {
 		const float wheel = ImGui::GetIO().MouseWheel;
 		if (wheel != 0.0f) {
 			zoom = std::clamp(zoom + wheel * 0.08f, 0.4f, 1.0f);
-			main_window.ast_zoom = zoom;
+			state.zoom_factor = zoom;
 		}
 	}
 
-	const int selected_index = main_window.selected_ast_node;
+	const int selected_index = state.selected_ast_node;
 
 	int step_hovered_index = -1;
-	if (main_window.step_hovered != nullptr) {
+	if (state.hovered_node) {
 		for (size_t i = 0; i < nodes.size(); ++i) {
-			if (nodes[i].source_node.get() == main_window.step_hovered) {
+			if (nodes[i].source_node == state.hovered_node) {
 				step_hovered_index = static_cast<int>(i);
 				break;
 			}
@@ -332,35 +317,45 @@ void DrawAstGraph(ExpressionVisualizerState& main_window, const std::shared_ptr<
 
 		ImGui::SetCursorScreenPos(rect_min);
 		ImGui::PushID(static_cast<int>(i));
-		const bool clicked = ImGui::InvisibleButton("ast_node_select", node.size);
+		ImGui::InvisibleButton("ast_node_select", node.size);
 		const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-		if (clicked || hovered) {
-			main_window.selected_ast_node = static_cast<int>(i);
+		if (hovered) {
+			state.selected_ast_node = static_cast<int>(i);
 			hovered_node_index = static_cast<int>(i);
-			const std::shared_ptr<AstNode>& selected_ast_node = nodes[i].source_node;
+			const AstNode::ptr_t& selected_ast_node = nodes[i].source_node;
 			if (selected_ast_node) {
-				main_window.request_source_highlight(selected_ast_node->loc);
+				state.request_source_highlight(selected_ast_node->loc);
 			}
 		}
 		ImGui::PopID();
 	}
 
 	const bool canvas_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-	const bool need_clear_hover_selection = hovered_node_index < 0 && (!canvas_hovered || !ImGui::IsAnyItemHovered());
-	if (need_clear_hover_selection && main_window.selected_ast_node >= 0 && main_window.step_hovered == nullptr) {
-		main_window.selected_ast_node = -1;
-		main_window.clear_source_highlight();
+	ImGuiIO& io = ImGui::GetIO();
+	if (canvas_hovered && !io.KeyCtrl && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+		state.panning_active = true;
+	}
+	if (!io.KeyCtrl && state.panning_active && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+		state.panning_active = false;
+	}
+	if (io.KeyCtrl) {
+		state.panning_active = false;
 	}
 
-	if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem | ImGuiHoveredFlags_AnyWindow) && !ImGui::GetIO().KeyCtrl && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+	const bool need_clear_hover_selection = hovered_node_index < 0 && (!canvas_hovered || !ImGui::IsAnyItemHovered());
+	if (need_clear_hover_selection && state.selected_ast_node >= 0 && !state.hovered_node) {
+		state.selected_ast_node = -1;
+	}
+
+	if (state.panning_active && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
 		const float min_visible = 24.0f;
 		const float min_scroll_x = std::max(0.0f, graph_origin_x - view_size.x + min_visible);
 		const float max_scroll_x = std::min(ImGui::GetScrollMaxX(), graph_origin_x + graph_width - min_visible);
 		const float min_scroll_y = std::max(0.0f, graph_origin_y - view_size.y + min_visible);
 		const float max_scroll_y = std::min(ImGui::GetScrollMaxY(), graph_origin_y + graph_height - min_visible);
 
-		const float next_scroll_x = std::clamp(ImGui::GetScrollX() - ImGui::GetIO().MouseDelta.x, min_scroll_x, max_scroll_x);
-		const float next_scroll_y = std::clamp(ImGui::GetScrollY() - ImGui::GetIO().MouseDelta.y, min_scroll_y, max_scroll_y);
+		const float next_scroll_x = std::clamp(ImGui::GetScrollX() - io.MouseDelta.x, min_scroll_x, max_scroll_x);
+		const float next_scroll_y = std::clamp(ImGui::GetScrollY() - io.MouseDelta.y, min_scroll_y, max_scroll_y);
 		ImGui::SetScrollX(next_scroll_x);
 		ImGui::SetScrollY(next_scroll_y);
 	}
@@ -368,11 +363,23 @@ void DrawAstGraph(ExpressionVisualizerState& main_window, const std::shared_ptr<
 	const ImVec2 visible_region = ImGui::GetContentRegionAvail();
 	ImGui::Dummy(ImVec2(std::max(content_width, visible_region.x), std::max(content_height, visible_region.y)));
 	ImGui::EndChild();
+
+	ImGui::TextDisabled("Ctrl + колесо: масштаб");
+	ImGui::SameLine();
+	ImGui::Text("x%.2f", zoom);
+	ImGui::TextDisabled("ЛКМ + перетаскивание: панорама");
 }
 
-void DrawSourceHoverPreview(const ExpressionVisualizerState& state, bool highlight_active) {
-	const std::string text(state.ast_source_copy.data());
+static void draw_expression_display_field(const ExpressionVisualizerState& state) {
+	bool highlight_active = state.selected_ast_node >= 0 || static_cast<bool>(state.hovered_node);
 	ImGui::BeginChild("SourceHoverPreview", ImVec2(0.0f, 78.0f), true);
+	if (!state.expression.has_value()) {
+		ImGui::TextDisabled("Исходный текст пуст");
+		ImGui::EndChild();
+		return;
+	}
+
+	const std::string_view text = *state.expression;
 
 	if (text.empty()) {
 		ImGui::TextDisabled("Исходный текст пуст");
@@ -388,7 +395,7 @@ void DrawSourceHoverPreview(const ExpressionVisualizerState& state, bool highlig
 
 	if (start >= end) {
 		ImGui::PushTextWrapPos();
-		ImGui::TextUnformatted(text.c_str());
+		ImGui::TextUnformatted(text.data(), text.data() + text.size());
 		ImGui::PopTextWrapPos();
 		ImGui::EndChild();
 		return;
@@ -397,25 +404,30 @@ void DrawSourceHoverPreview(const ExpressionVisualizerState& state, bool highlig
 	const int snippet_radius = 56;
 	const int snippet_start = std::max(0, start - snippet_radius);
 	const int snippet_end = std::min(static_cast<int>(text.size()), end + snippet_radius);
-
-	const std::string prefix = text.substr(snippet_start, static_cast<size_t>(start - snippet_start));
-	const std::string marked = text.substr(start, static_cast<size_t>(end - start));
-	const std::string suffix = text.substr(end, static_cast<size_t>(snippet_end - end));
+	const char* text_begin = text.data();
+	const char* prefix_begin = text_begin + snippet_start;
+	const char* prefix_end = text_begin + start;
+	const char* marked_begin = text_begin + start;
+	const char* marked_end = text_begin + end;
+	const char* suffix_begin = text_begin + end;
+	const char* suffix_end = text_begin + snippet_end;
 
 	ImGui::PushTextWrapPos();
 	if (snippet_start > 0) {
 		ImGui::TextDisabled("...");
 		ImGui::SameLine(0.0f, 0.0f);
 	}
-	ImGui::TextUnformatted(prefix.c_str());
+	ImGui::TextUnformatted(prefix_begin, prefix_end);
 	ImGui::SameLine(0.0f, 0.0f);
 	if (highlight_active) {
-		ImGui::TextColored(ImVec4(0.95f, 0.82f, 0.35f, 1.0f), "%s", marked.c_str());
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.82f, 0.35f, 1.0f));
+		ImGui::TextUnformatted(marked_begin, marked_end);
+		ImGui::PopStyleColor();
 	} else {
-		ImGui::TextUnformatted(marked.c_str());
+		ImGui::TextUnformatted(marked_begin, marked_end);
 	}
 	ImGui::SameLine(0.0f, 0.0f);
-	ImGui::TextUnformatted(suffix.c_str());
+	ImGui::TextUnformatted(suffix_begin, suffix_end);
 	if (snippet_end < static_cast<int>(text.size())) {
 		ImGui::SameLine(0.0f, 0.0f);
 		ImGui::TextDisabled("...");
@@ -424,26 +436,14 @@ void DrawSourceHoverPreview(const ExpressionVisualizerState& state, bool highlig
 	ImGui::EndChild();
 }
 
-void DrawTopRightPanel(ExpressionVisualizerState& state) {
-	const bool has_active_source_hover = state.selected_ast_node >= 0 || state.step_hovered != nullptr;
 
-	ImGui::Dummy(ImVec2(0.0f, 1.0f));
+void draw_expression_visualizer(ExpressionVisualizerState& expr_vis_state, CommandBuffer& cmd_buf) {    
 	ImGui::SameLine(0.0f, 0.0f);
-	const float close_button_width = ImGui::GetFrameHeight();
-	const float close_button_x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - close_button_width;
-	ImGui::SetCursorPosX(std::max(0.0f, close_button_x));
-	if (ImGui::Button("x")) {
-		state.right_panel_open = false;
-	}
-	ImGui::Separator();
-	DrawSourceHoverPreview(state, has_active_source_hover);
+
+	ImGui::BeginChild("ExpressionVisualizer", ImVec2(0.0f, expr_vis_state.height), true);
+	draw_expression_display_field(expr_vis_state);
 	ImGui::Spacing();
-	DrawAstGraph(state, state.root);
-}
+	draw_ast_visualizer(expr_vis_state);
 
-void DrawExpressionVisualizer(ExpressionVisualizerState& expr_vis_state, CommandBuffer& cmd_buf) {    
-	ImGui::SameLine(0.0f, 0.0f);
-	ImGui::BeginChild("TopRightPanel", ImVec2(0.0f, expr_vis_state.panel_height), true);
-	DrawTopRightPanel(expr_vis_state);
 	ImGui::EndChild();
 }

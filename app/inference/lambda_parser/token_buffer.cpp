@@ -2,6 +2,42 @@
 #include "token_buffer.h"
 
 #include <algorithm>
+#include <cctype>
+
+namespace {
+bool is_builtin_spelling(std::string_view identifier, std::string_view canonical_lower) {
+    if(identifier.size() != canonical_lower.size())
+        return false;
+
+    if(identifier == canonical_lower)
+        return true;
+
+    bool all_upper = true;
+    for(size_t i = 0; i < canonical_lower.size(); ++i) {
+        const auto expected = static_cast<char>(std::toupper(static_cast<unsigned char>(canonical_lower[i])));
+        if(identifier[i] != expected) {
+            all_upper = false;
+            break;
+        }
+    }
+    if(all_upper)
+        return true;
+
+    if(canonical_lower.empty())
+        return false;
+
+    const auto first_upper = static_cast<char>(std::toupper(static_cast<unsigned char>(canonical_lower[0])));
+    if(identifier[0] != first_upper)
+        return false;
+
+    for(size_t i = 1; i < canonical_lower.size(); ++i) {
+        if(identifier[i] != canonical_lower[i])
+            return false;
+    }
+
+    return true;
+}
+}
 
 
 Token::Token(TokenKind kind, std::string_view data, const SourceLoc& loc) : Token(kind, "", data, loc) {}
@@ -18,11 +54,11 @@ TokenBuffer::SymbolKind TokenBuffer::Symbol::from_char(char c) {
     else if(c >= '0' && c <= '9') return SymbolKind::NUM;
     else if(c == '\\') return SymbolKind::LAMBDA;
     else if(c == '.') return SymbolKind::DOT;
-    else if(c == '=') return SymbolKind::EQUAL;
     else if(c == '(') return SymbolKind::LPAREN;
     else if(c == ')') return SymbolKind::RPAREN;
     else if(c == '"' || c == '\'') return SymbolKind::QUOTE;
-    else if(c == '[' || c == ']' || c == ':') return SymbolKind::OP_SYMBOL;
+    else if(c == '[' || c == ']' || c == ':' || c == '+' || c == '-' || c == '*' || c == '/' || c == '&' || c == '|' || c == '!' || c == '=')
+        return SymbolKind::OP_SYMBOL;
     else return SymbolKind::ERROR;
 }
 
@@ -54,16 +90,14 @@ Token TokenBuffer::next_identifier() {
     
     auto identifier = data.substr(start, pos - start);
 
-    std::string id_ignore_case;
-    id_ignore_case.resize(identifier.length());
-    std::transform(identifier.begin(), identifier.end(), id_ignore_case.begin(), tolower);
-
-    if(id_ignore_case == "if") return Token(TokenKind::IF, identifier, loc);
-    if(id_ignore_case == "then") return Token(TokenKind::THEN, identifier, loc);
-    if(id_ignore_case == "else") return Token(TokenKind::ELSE, identifier, loc);
-    if(id_ignore_case == "let") return Token(TokenKind::LET, identifier, loc);
-    if(id_ignore_case == "in") return Token(TokenKind::IN, identifier, loc);
-    if(id_ignore_case == "fix") return Token(TokenKind::FIX, identifier, loc);
+    if(is_builtin_spelling(identifier, "if")) return Token(TokenKind::IF, identifier, loc);
+    if(is_builtin_spelling(identifier, "then")) return Token(TokenKind::THEN, identifier, loc);
+    if(is_builtin_spelling(identifier, "else")) return Token(TokenKind::ELSE, identifier, loc);
+    if(is_builtin_spelling(identifier, "let")) return Token(TokenKind::LET, identifier, loc);
+    if(is_builtin_spelling(identifier, "in")) return Token(TokenKind::IN, identifier, loc);
+    if(is_builtin_spelling(identifier, "fix")) return Token(TokenKind::FIX, identifier, loc);
+    if(is_builtin_spelling(identifier, "true") || is_builtin_spelling(identifier, "false"))
+        return Token(TokenKind::DATA, "Bool", identifier, loc);
     
     return Token(TokenKind::IDENTIFIER, identifier, loc);
 }
@@ -130,6 +164,14 @@ Token TokenBuffer::next_op() {
 
     if(op == "::") return Token(TokenKind::IDENTIFIER, op, loc);
     if(op == "[]") return Token(TokenKind::IDENTIFIER, op, loc);
+    if(op == "+") return Token(TokenKind::IDENTIFIER, op, loc);
+    if(op == "-") return Token(TokenKind::IDENTIFIER, op, loc);
+    if(op == "*") return Token(TokenKind::IDENTIFIER, op, loc);
+    if(op == "/") return Token(TokenKind::IDENTIFIER, op, loc);
+    if(op == "&&") return Token(TokenKind::IDENTIFIER, op, loc);
+    if(op == "||") return Token(TokenKind::IDENTIFIER, op, loc);
+    if(op == "!") return Token(TokenKind::IDENTIFIER, op, loc);
+    if(op == "=") return Token(TokenKind::IDENTIFIER, op, loc);
     
     return Token(TokenKind::ERROR, op, loc);
 }
@@ -155,7 +197,6 @@ Token TokenBuffer::next_token() {
     pos++;
     switch (c.kind) {
         case SymbolKind::LAMBDA : return Token(TokenKind::LAMBDA, "λ", loc);
-        case SymbolKind::EQUAL  : return Token(TokenKind::EQUAL, "=", loc);
         case SymbolKind::DOT    : return Token(TokenKind::DOT, ".", loc);
         case SymbolKind::LPAREN : return Token(TokenKind::LPAREN, "(", loc);
         case SymbolKind::RPAREN : return Token(TokenKind::RPAREN, ")", loc);
@@ -163,7 +204,7 @@ Token TokenBuffer::next_token() {
     }
 }
 
-TokenBuffer::TokenBuffer(const std::string& target) 
+TokenBuffer::TokenBuffer(const std::string_view& target) 
     : data(target), pos(0), current(next_token()) {}
     
 const Token& TokenBuffer::front() { return current; }

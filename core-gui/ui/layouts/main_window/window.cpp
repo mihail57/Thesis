@@ -11,6 +11,9 @@
 #include "imgui.h"
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <commdlg.h>
 #else
@@ -65,26 +68,26 @@ static void set_ui_state_from_inf_mgr_state(MainWindowState& window, const Infer
 	if(window.input_type == InputType::File)
 		CopyStringToBuffer(window.file_path, inf_mgr_state.input);
 	else
-		CopyStringToBuffer(window.text_input, inf_mgr_state.input);
+		CopyStringToBuffer(window.expression_input, inf_mgr_state.input);
 	
-	CopyStringToBuffer(window.expr_vis_state.ast_source_copy, inf_mgr_state.expression);
+	window.expr_vis_state.set_expression(inf_mgr_state.expression);
 	window.input_type = inf_mgr_state.input_type;
 	window.algorithm = inf_mgr_state.algorithm;
-	window.expr_vis_state.root = inf_mgr_state.input_parsed;
+	window.expr_vis_state.ast_root = inf_mgr_state.input_parsed;
 	window.step_vis_state.alg_state = inf_mgr_state.alg_state;
 	window.result = inf_mgr_state.result;
 	++window.step_vis_state.steps_ui_generation;
 }
 
-int AlgorithmKindToComboIndex(AlgorithmKind algorithm) {
+static int algorithm_kind_to_combo_index(AlgorithmKind algorithm) {
 	return algorithm == AlgorithmKind::W ? 0 : 1;
 }
 
-AlgorithmKind ComboIndexToAlgorithmKind(int idx) {
+static AlgorithmKind combo_index_to_algorithm_kind(int idx) {
 	return idx == 0 ? AlgorithmKind::W : AlgorithmKind::M;
 }
 
-void ResetMainWindowUiAfterInferenceReset(MainWindowState& main_window) {
+static void reset(MainWindowState& main_window) {
 	main_window.result = std::nullopt;
 
 	main_window.expr_vis_state.reset();
@@ -92,7 +95,7 @@ void ResetMainWindowUiAfterInferenceReset(MainWindowState& main_window) {
 	main_window.step_vis_state.reset();
 }
 
-void DrawVerticalSplitter(float height, float thickness, float& left_width, float& right_width, float min_left, float min_right) {
+static void draw_vertical_splitter(float height, float thickness, float& left_width, float& right_width, float min_left, float min_right) {
 	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
 	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.35f, 0.35f, 0.35f, 0.45f));
 	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.45f, 0.45f, 0.45f, 0.65f));
@@ -116,7 +119,7 @@ void DrawVerticalSplitter(float height, float thickness, float& left_width, floa
 	ImGui::PopStyleColor(3);
 }
 
-void DrawHorizontalSplitter(float width, float thickness, float& top_height, float& bottom_height, float min_top, float min_bottom) {
+static void draw_horizontal_splitter(float width, float thickness, float& top_height, float& bottom_height, float min_top, float min_bottom) {
 	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
 	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.35f, 0.35f, 0.35f, 0.45f));
 	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.45f, 0.45f, 0.45f, 0.65f));
@@ -140,78 +143,7 @@ void DrawHorizontalSplitter(float width, float thickness, float& top_height, flo
 	ImGui::PopStyleColor(3);
 }
 
-void DrawTopLeftPanel(CommandBuffer& cmd_buf, MainWindowState& state) {
-	int algorithm_combo_index = AlgorithmKindToComboIndex(state.algorithm);
-
-	ImGui::Checkbox("Показать правую панель", &state.expr_vis_state.right_panel_open);
-	ImGui::Separator();
-
-	const bool text_selected = state.input_type == InputType::Text;
-	if (ImGui::RadioButton("Текстовый ввод", text_selected) && state.input_type != InputType::Text) {
-		state.input_type = InputType::Text;
-		cmd_buf.push(SetInputTypeCommand{.new_input_type = state.input_type});
-		ResetMainWindowUiAfterInferenceReset(state);
-	}
-	ImGui::SameLine();
-	const bool file_selected = state.input_type == InputType::File;
-	if (ImGui::RadioButton("Выбор файла", file_selected) && state.input_type != InputType::File) {
-		state.input_type = InputType::File;
-		cmd_buf.push(SetInputTypeCommand{.new_input_type = state.input_type});
-		ResetMainWindowUiAfterInferenceReset(state);
-	}
-
-	if (state.input_type == InputType::Text) {
-		ImGui::InputTextMultiline(
-			"##text_input",
-			state.text_input.data(),
-			state.text_input.size(),
-			ImVec2(-1.0f, 120.0f)
-		);
-	} else {
-		ImGui::InputText("Файл", state.file_path.data(), state.file_path.size());
-		ImGui::SameLine();
-		if (ImGui::Button("...")) {
-			if (auto path = OpenFileDialog()) {
-				CopyStringToBuffer(state.file_path, *path);
-			}
-		}
-	}
-
-	const char* second_combo_items[] = {"W", "M"};
-	ImGui::Combo("Алгоритм", &algorithm_combo_index, second_combo_items, IM_ARRAYSIZE(second_combo_items));
-
-	const AlgorithmKind selected_algorithm = ComboIndexToAlgorithmKind(algorithm_combo_index);
-	if (selected_algorithm != state.algorithm) {
-		cmd_buf.push(SetAlgorithmCommand{selected_algorithm});
-		state.algorithm = selected_algorithm;
-		ResetMainWindowUiAfterInferenceReset(state);
-	}
-
-	if (ImGui::Button("Запустить")) {
-		std::string input;
-		if(state.input_type == InputType::File)
-			input = std::string(state.file_path.data());
-		else
-			input = std::string(state.text_input.data());
-		
-		cmd_buf.push(SetInputCommand{input});
-		cmd_buf.push(RunAlgorithmCommand{true});
-	}
-
-	ImGui::Separator();
-	ImGui::TextUnformatted("Результат");
-	ImGui::BeginChild("TopLeftResult", ImVec2(0.0f, 0.0f), true);
-	if (!state.result.has_value()) {
-		ImGui::TextDisabled("Пока нет результата");
-	} else {
-		if (state.monospace_font) ImGui::PushFont(state.monospace_font);
-		ImGui::TextWrapped("%s", state.result.value().data());
-		if (state.monospace_font) ImGui::PopFont();
-	}
-	ImGui::EndChild();
-}
-
-MainWindowState::MainWindowState(const AppState& app_state) {
+MainWindowState::MainWindowState(const UiInitStruct& app_state) {
 	set_ui_state_from_inf_mgr_state(*this, app_state.inf_mgr_state);
         
         if (!app_state.monospace_font_path.empty()) {
@@ -220,7 +152,7 @@ MainWindowState::MainWindowState(const AppState& app_state) {
         }
 }
 
-void DrawMainWindow(CommandBuffer& cmd_buf, MainWindowState& main_window) {
+void draw_main_window(CommandBuffer& cmd_buf, MainWindowState& main_window) {
 	constexpr float splitter_thickness = 8.0f;
 	constexpr float min_top_height = 220.0f;
 	constexpr float min_bottom_height = 120.0f;
@@ -245,45 +177,111 @@ void DrawMainWindow(CommandBuffer& cmd_buf, MainWindowState& main_window) {
 	float bottom_height = std::clamp(main_window.step_vis_state.reserved_height, min_bottom_height, std::max(min_bottom_height, available.y - min_top_height - splitter_thickness));
 	float top_height = std::max(min_top_height, available.y - bottom_height - splitter_thickness);
 
-	ImGui::BeginChild("TopPanelRoot", ImVec2(0.0f, top_height), false, ImGuiWindowFlags_NoMove);
+	ImGui::BeginChild("InputWindowRoot", ImVec2(0.0f, top_height), false, ImGuiWindowFlags_NoMove);
 	ImVec2 child_available = ImGui::GetContentRegionAvail();
 	float panel_height = std::max(child_available.y, 1.0f);
 
 	constexpr float min_left_width = 260.0f;
 	constexpr float min_right_width = 220.0f;
 
-	float right_width = std::clamp(main_window.expr_vis_state.right_panel_width, min_right_width, std::max(min_right_width, available.x - min_left_width - splitter_thickness));
-	float left_width = main_window.expr_vis_state.right_panel_open
-		? std::max(min_left_width, child_available.x - right_width - splitter_thickness)
-		: child_available.x;
+	float right_width = std::clamp(main_window.expr_vis_state.width, min_right_width, std::max(min_right_width, available.x - min_left_width - splitter_thickness));
+	float left_width = std::max(min_left_width, child_available.x - right_width - splitter_thickness);
 
-	ImGui::BeginChild("TopLeftPanel", ImVec2(left_width, panel_height), true);
-	DrawTopLeftPanel(cmd_buf, main_window);
-	ImGui::EndChild();
+	ImGui::BeginChild("InputWindow", ImVec2(left_width, panel_height), true);
 
-	if(main_window.expr_vis_state.right_panel_open) {
-		ImGui::SameLine(0.0f, 0.0f);
-		ImGui::PushID("TopPanelVerticalSplitter");
-		DrawVerticalSplitter(panel_height, splitter_thickness, left_width, right_width, min_left_width, min_right_width);
-		ImGui::PopID();
+	int algorithm_combo_index = algorithm_kind_to_combo_index(main_window.algorithm);
 
-		main_window.expr_vis_state.panel_height = panel_height;
-		DrawExpressionVisualizer(main_window.expr_vis_state, cmd_buf);
+	const bool text_selected = main_window.input_type == InputType::Text;
+	if (ImGui::RadioButton("Текстовый ввод", text_selected) && main_window.input_type != InputType::Text) {
+		main_window.input_type = InputType::Text;
+		cmd_buf.push(SetInputTypeCommand{.new_input_type = main_window.input_type});
+		reset(main_window);
+	}
+	ImGui::SameLine();
+	const bool file_selected = main_window.input_type == InputType::File;
+	if (ImGui::RadioButton("Выбор файла", file_selected) && main_window.input_type != InputType::File) {
+		main_window.input_type = InputType::File;
+		cmd_buf.push(SetInputTypeCommand{.new_input_type = main_window.input_type});
+		reset(main_window);
+	}
 
-		main_window.expr_vis_state.right_panel_width = right_width;
+	if (main_window.input_type == InputType::Text) {
+		ImGui::InputTextMultiline(
+			"##text_input",
+			main_window.expression_input.data(),
+			main_window.expression_input.size(),
+			ImVec2(-1.0f, 120.0f)
+		);
+	} else {
+		ImGui::InputText("Файл", main_window.file_path.data(), main_window.file_path.size());
+		ImGui::SameLine();
+		if (ImGui::Button("...")) {
+			if (auto path = OpenFileDialog()) {
+				CopyStringToBuffer(main_window.file_path, *path);
+			}
+		}
+	}
+
+	const char* second_combo_items[] = {"W", "M"};
+	ImGui::Combo("Алгоритм", &algorithm_combo_index, second_combo_items, IM_ARRAYSIZE(second_combo_items));
+
+	const AlgorithmKind selected_algorithm = combo_index_to_algorithm_kind(algorithm_combo_index);
+	if (selected_algorithm != main_window.algorithm) {
+		cmd_buf.push(SetAlgorithmCommand{selected_algorithm});
+		main_window.algorithm = selected_algorithm;
+		reset(main_window);
+	}
+
+	ImGui::SameLine();
+	const float run_button_width = ImGui::CalcTextSize("Запустить").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+	const float avail_for_button = ImGui::GetContentRegionAvail().x;
+	if (avail_for_button > run_button_width) {
+		ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (avail_for_button - run_button_width));
+	}
+	if (ImGui::Button("Запустить")) {
+		std::string input;
+		if(main_window.input_type == InputType::File)
+			input = std::string(main_window.file_path.data());
+		else
+			input = std::string(main_window.expression_input.data());
+		
+		cmd_buf.push(SetInputCommand{input});
+		cmd_buf.push(RunAlgorithmCommand{true});
+	}
+
+	ImGui::Separator();
+	ImGui::TextUnformatted("Результат");
+	ImGui::BeginChild("ResultDisplay", ImVec2(0.0f, 0.0f), true);
+	if (!main_window.result.has_value()) {
+		ImGui::TextDisabled("Пока нет результата");
+	} else {
+		if (main_window.monospace_font) ImGui::PushFont(main_window.monospace_font);
+		ImGui::TextWrapped("%s", main_window.result.value().data());
+		if (main_window.monospace_font) ImGui::PopFont();
 	}
 	ImGui::EndChild();
+	
+	ImGui::EndChild();
 
-	ImGui::PushID("MainWindowHorizontalSplitter");
-	DrawHorizontalSplitter(available.x, splitter_thickness, top_height, bottom_height, min_top_height, min_bottom_height);
+	ImGui::SameLine(0.0f, 0.0f);
+	ImGui::PushID("VerticalSplitter");
+	draw_vertical_splitter(panel_height, splitter_thickness, left_width, right_width, min_left_width, min_right_width);
 	ImGui::PopID();
 
-	DrawStepVisualizer(main_window.step_vis_state, cmd_buf);
-	main_window.expr_vis_state.step_hovered = main_window.step_vis_state.hovered_step_node;
-	if (main_window.step_vis_state.hovered_step_node != nullptr) {
+	main_window.expr_vis_state.height = panel_height;
+	draw_expression_visualizer(main_window.expr_vis_state, cmd_buf);
+
+	main_window.expr_vis_state.width = right_width;
+	ImGui::EndChild();
+
+	ImGui::PushID("HorizontalSplitter");
+	draw_horizontal_splitter(available.x, splitter_thickness, top_height, bottom_height, min_top_height, min_bottom_height);
+	ImGui::PopID();
+
+	draw_step_visualizer(main_window.step_vis_state, cmd_buf);
+	main_window.expr_vis_state.hovered_node = main_window.step_vis_state.hovered_step_node;
+	if (main_window.step_vis_state.hovered_step_node) {
 		main_window.expr_vis_state.request_source_highlight(main_window.step_vis_state.hovered_step_node->loc);
-	} else if (main_window.expr_vis_state.selected_ast_node < 0) {
-		main_window.expr_vis_state.clear_source_highlight();
 	}
 
 	main_window.step_vis_state.reserved_height = bottom_height;

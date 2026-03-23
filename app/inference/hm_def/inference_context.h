@@ -4,9 +4,9 @@
 
 #include "type_scheme.h"
 
-class TypingContext {
+class InferenceContext {
 private:
-    std::map<std::string, std::shared_ptr<TypeScheme>> _context;
+    std::map<std::string, TypeScheme::ptr_t> _context;
 
 public:
     using iterator = decltype(_context)::iterator;
@@ -21,8 +21,8 @@ public:
     bool has(const std::string& var);
     context_pair& get(const std::string& var);
     void set(const context_pair::first_type& var, const context_pair::second_type& scheme);
-    TypingContext with(const context_pair::first_type& var, const context_pair::second_type& scheme);
-    std::shared_ptr<TypeScheme> generalize(std::shared_ptr<Type>& type);
+    InferenceContext with(const context_pair::first_type& var, const context_pair::second_type& scheme);
+    TypeScheme::ptr_t generalize(Type::base_ptr_t& type);
 };
 
 #endif

@@ -37,7 +37,7 @@ void App::execute_commands() {
     cmd_buf.value().get().clear();
 }
 
-AppState& App::get_app_state() { return app_state; }
+UiInitStruct& App::get_app_state() { return app_state; }
 
 void App::set_default_properties(std::string input, InputType input_type, AlgorithmKind algorithm) {
     auto& inf_mgr = internal->inf_mgr;

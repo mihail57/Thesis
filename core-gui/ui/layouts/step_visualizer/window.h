@@ -3,4 +3,4 @@
 
 struct StepVisualizerState;
 
-void DrawStepVisualizer(StepVisualizerState& step_vis_state, CommandBuffer& cmd_buf);
+void draw_step_visualizer(StepVisualizerState& step_vis_state, CommandBuffer& cmd_buf);
