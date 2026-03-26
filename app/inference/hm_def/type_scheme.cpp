@@ -3,6 +3,7 @@
 
 #include <sstream>
 #include <unordered_map>
+#include <algorithm>
 
 
 TypeScheme::~TypeScheme() {};
@@ -25,7 +26,7 @@ Type::base_ptr_t PolyTypeScheme::instantiate() const {
 std::string PolyTypeScheme::to_str() const {
     std::ostringstream ss;
     if(binded_type_vars.size() > 0) {
-        for(const auto& binded: binded_type_vars) ss << "∀" << binded->to_str(false);
+        for(const auto& binded: binded_type_vars) ss << "AA" << binded->to_str(false);
         ss << ". ";
     }
     ss << type_body->to_str(false);

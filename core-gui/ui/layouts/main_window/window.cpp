@@ -174,7 +174,7 @@ void draw_main_window(CommandBuffer& cmd_buf, MainWindowState& main_window) {
 	}
 
 	const ImVec2 available = ImGui::GetContentRegionAvail();
-	float bottom_height = std::clamp(main_window.step_vis_state.reserved_height, min_bottom_height, std::max(min_bottom_height, available.y - min_top_height - splitter_thickness));
+	float bottom_height = std::clamp(main_window.step_vis_state.height, min_bottom_height, std::max(min_bottom_height, available.y - min_top_height - splitter_thickness));
 	float top_height = std::max(min_top_height, available.y - bottom_height - splitter_thickness);
 
 	ImGui::BeginChild("InputWindowRoot", ImVec2(0.0f, top_height), false, ImGuiWindowFlags_NoMove);
@@ -284,7 +284,7 @@ void draw_main_window(CommandBuffer& cmd_buf, MainWindowState& main_window) {
 		main_window.expr_vis_state.request_source_highlight(main_window.step_vis_state.hovered_step_node->loc);
 	}
 
-	main_window.step_vis_state.reserved_height = bottom_height;
+	main_window.step_vis_state.height = bottom_height;
 	ImGui::End();
 
 }

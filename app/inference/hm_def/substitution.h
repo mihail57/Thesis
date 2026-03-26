@@ -7,6 +7,7 @@ struct Substitution {
     Type::base_ptr_t apply_to(const Type::base_ptr_t& to) const;
     InferenceContext apply_to(const InferenceContext& to) const;
     Substitution operator+(const Substitution& other) const;
+    std::string to_str() const;
 
     static Substitution make_identity();
 };

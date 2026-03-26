@@ -1,5 +1,5 @@
 
-add_executable(core-gui)
+add_executable(inference-gui)
 
 
 include(FetchContent)
@@ -38,12 +38,12 @@ FetchContent_MakeAvailable(Freetype)
 include_directories(${INFRASTRUCTURE_DIR})
 
 if (WIN32)
-    set_property(TARGET core-gui PROPERTY WIN32_EXECUTABLE ON)
+    set_property(TARGET inference-gui PROPERTY WIN32_EXECUTABLE ON)
 endif()
 
 add_subdirectory(renderer)
 add_subdirectory(ui)
 
-target_sources(core-gui PRIVATE main.cpp)
+target_sources(inference-gui PRIVATE main.cpp)
 
-target_link_libraries(core-gui PRIVATE ui renderer app)
+target_link_libraries(inference-gui PRIVATE ui renderer app)

@@ -86,7 +86,7 @@ bool launch_gui(const Flags& flags) {
     const auto passthrough_args = serialize_flags(flags);
 
 #ifdef _WIN32
-    const auto gui_path = exe_dir / "core-gui.exe";
+    const auto gui_path = exe_dir / "inference-gui.exe";
     if (!std::filesystem::exists(gui_path)) {
         return false;
     }
@@ -124,7 +124,7 @@ bool launch_gui(const Flags& flags) {
     CloseHandle(process_info.hProcess);
     return true;
 #else
-    const auto gui_path = exe_dir / "core-gui";
+    const auto gui_path = exe_dir / "inference-gui";
     if (!std::filesystem::exists(gui_path)) {
         return false;
     }
@@ -232,7 +232,7 @@ int main(int argc, char** argv) {
 
     if(parsed_flags.is_flag_set<'g'>()) {
         if(!launch_gui(parsed_flags)) {
-            std::cerr << "Не удалось запустить core-gui из директории текущего исполняемого файла." << std::endl;
+            std::cerr << "Не удалось запустить inference-gui из директории текущего исполняемого файла." << std::endl;
             return -1;
         }
         return 0;

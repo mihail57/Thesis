@@ -182,7 +182,6 @@ Type::base_ptr_t TypeConstructor::make_sub(const TypeVar::ptr_t& target, const T
 }
 
 void TypeConstructor::get_vars(std::vector<TypeVar::ptr_t>& type_vars) {
-    name->get_vars(type_vars);
     for(const auto& arg : args)
         arg->get_vars(type_vars);
 }

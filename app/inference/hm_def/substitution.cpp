@@ -1,6 +1,8 @@
 
 #include "substitution.h"
 
+#include <sstream>
+
 
 Type::base_ptr_t Substitution::apply_to(const Type::base_ptr_t& to) const {
     if (subs.empty()) return to;
@@ -56,6 +58,24 @@ Substitution Substitution::operator+(const Substitution& other) const {
     
     return result;
 }    
+
+std::string Substitution::to_str() const {
+    std::ostringstream ss;
+    bool first = true;
+    ss << "{ ";
+
+    for (const auto& pair : subs) {
+        if (!first) {
+            ss << ", ";
+        }
+        first = false;
+
+        ss << pair.first->to_str(false) << " :-> " << pair.second->to_str(false);
+    }
+
+    ss << " }";
+    return ss.str();
+}
 
 Substitution Substitution::make_identity() {
     return Substitution {};

@@ -1,8 +1,8 @@
 
-add_executable(core)
+add_executable(inference)
 
 include_directories(${INFRASTRUCTURE_DIR})
 
-target_sources(core PRIVATE main.cpp)
+target_sources(inference PRIVATE main.cpp)
 
-target_link_libraries(core PRIVATE app)
+target_link_libraries(inference PRIVATE app)

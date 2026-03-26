@@ -6,11 +6,6 @@
 #include <string>
 #include "ast_def.h"
 
-struct InferenceContextData {
-    // Пары переменная - значение
-    std::vector<std::pair<std::string, std::string>> data;
-};
-
 struct AlgorithmStep {
     std::string data;
     AstNode::ptr_t at;
@@ -18,7 +13,6 @@ struct AlgorithmStep {
 
 struct AlgorithmState {
     std::vector<AlgorithmStep> steps;
-    InferenceContextData ctx;
 };
 
 #endif

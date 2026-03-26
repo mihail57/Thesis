@@ -37,10 +37,6 @@ struct Type {
 
     std::string to_str(bool pretty_print = true) const;
     virtual std::string to_str_impl(TypeStringifier& ctx, bool pretty_print = true) const = 0;
-
-    virtual bool operator=(Type* b) { 
-        return true; 
-    }
 };
 
 

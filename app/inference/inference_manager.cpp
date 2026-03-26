@@ -183,13 +183,13 @@ SubstitutionOrError InferenceManager::MGU(const Type::base_ptr_t& first, const T
             ) {
                 Substitution s;
                 for(int i = 0; i < f_constructor->args.size(); i++) {
-                    auto res = MGU(f_constructor->args[i], s_constructor->args[i]);
+                    auto res = MGU(s.apply_to(f_constructor->args[i]), s.apply_to(s_constructor->args[i]));
                     if(res.is_error()) {
                         auto error = res.get_error();
                         error.text += "\nпри унификации " + f_constructor->to_str_impl(ctx) + " и " + s_constructor->to_str_impl(ctx) + " (given and expected types of " + f_constructor->to_str_impl(ctx) + " )";
                         return error;
                     }
-                    s = s + res.unwrap();
+                    s = res.unwrap() + s;
                 }
 
                 return s;
@@ -205,7 +205,13 @@ ResultOrError InferenceManager::W(
     ConstNode::ptr_t node
 ) {
     add_algorithm_step(
-        std::format("Тип константного выражения {}: {}", node->value, node->type),
+        std::format(
+            "Тип узла берём из аннотации константы {}: {}.\n"
+            "Подстановка не добавляет новых ограничений: S = {}.",
+            node->value,
+            node->type,
+            Substitution::make_identity().to_str()
+        ),
         node
     );
 
@@ -230,7 +236,15 @@ ResultOrError InferenceManager::W(
     auto inst = scheme->instantiate();
     
     add_algorithm_step(
-        std::format("Получаем схему типа переменной {} из контекста: {}\n\nПолучаем экземпляр этой схемы: {}", node->var, scheme->to_str(), inst->to_str(false)),
+        std::format(
+            "Находим схему типа переменной {} в контексте: {}.\n"
+            "Инстанцируем схему, получаем мономорфный тип: {}.\n"
+            "Новых ограничений не появилось, подстановка остаётся тождественной: S = {}.",
+            node->var,
+            scheme->to_str(),
+            inst->to_str(false),
+            sub.to_str()
+        ),
         node
     );
 
@@ -254,10 +268,14 @@ ResultOrError InferenceManager::W(
     
     add_algorithm_step(
         std::format(
-            "Создаём свежую типовую переменную {}\n"
-            "Копируем контекст типизации, добавляем в неё связку {}: {}\n"
-            "Вызываем W с копией контекста на теле функции.",
-            beta->to_str(false), node->param->var, beta_ts->to_str()),
+            "Создаём свежую типовую переменную {} для аргумента {}.\n"
+            "Расширяем контекст связкой {}: {}.\n"
+            "Вызываем W на теле функции.",
+            node->param->var,
+            beta->to_str(false),
+            node->param->var,
+            beta_ts->to_str()
+        ),
         node
     );
 
@@ -275,13 +293,15 @@ ResultOrError InferenceManager::W(
 
     add_algorithm_step(
         std::format(
-            "Применяем полученную подстановку к свежей переменной {}:\n"
-            "Результат - {} (тип аргумента лямбды)\n"
-            "Тип тела функции (результат вложенного вызова W) - {}\n"
-            "Итоговый тип функции: {}.",
-            beta->to_str(false),
-            arg_type->to_str(false),
+            "Получили T_body = {} и S1 = {}.\n"
+            "Применяем S1 к типу параметра {} и получаем тип аргумента {}.\n"
+            "Собираем итоговый тип функции {}.\n"
+            "Возвращаем пару ({} , S1).",
+            t_1->to_str(false),
+            s_1.to_str(),
+            beta_upcasted->to_str(false),
             body_type->to_str(false),
+            result_type->to_str(false),
             result_type->to_str(false)
         ),
         node
@@ -294,6 +314,7 @@ ResultOrError InferenceManager::W(
     InferenceContext& gamma,
     AppNode::ptr_t node
 ) {
+    add_algorithm_step("Вызываем W для функциональной части e1.", node);
     auto res_1 = W(gamma, node->func);
 
     if(res_1.is_error()) {
@@ -303,6 +324,15 @@ ResultOrError InferenceManager::W(
     auto [t_1, s_1] = res_1.unwrap();
 
     InferenceContext new_ctx = s_1.apply_to(gamma);
+    add_algorithm_step(
+        std::format(
+            "После W(e1) получили T1 = {} и S1 = {}.\n"
+            "Применяем S1 к контексту и вычисляем W для аргумента e2.",
+            t_1->to_str(false),
+            s_1.to_str()
+        ),
+        node
+    );
     auto res_2 = W(new_ctx, node->arg);
 
     if(res_2.is_error()) {
@@ -312,6 +342,19 @@ ResultOrError InferenceManager::W(
     auto [t_2, s_2] = res_2.unwrap();
 
     auto beta = TypeVar::generate_fresh();
+    add_algorithm_step(
+        std::format(
+            "После W(e2) получили T2 = {} и S2 = {}.\n"
+            "Вводим свежий тип результата {} и унифицируем S2(T1) = {} с {} -> {}.",
+            t_2->to_str(false),
+            s_2.to_str(),
+            beta->to_str(false),
+            s_2.apply_to(t_1)->to_str(false),
+            t_2->to_str(false),
+            beta->to_str(false)
+        ),
+        node
+    );
     auto res_3 = MGU(
         s_2.apply_to(t_1), 
         make_func_type(t_2, beta)
@@ -320,30 +363,29 @@ ResultOrError InferenceManager::W(
     if(res_3.is_error()) {
         auto error = res_3.get_error();
         error.at = node->loc;
+        add_algorithm_step("Унификация в узле применения завершилась ошибкой.", node);
         return error;
     }
 
     auto s_3 = res_3.unwrap();
     auto result_type = s_3.apply_to(beta);
+    auto result_sub = s_3 + s_2 + s_1;
 
     add_algorithm_step(
         std::format(
-            "Обработка применения (e1 e2):\n"
-            "1) Тип функции e1: {}.\n"
-            "2) Тип аргумента e2: {}.\n"
-            "3) Вводим свежий результат {} и унифицируем тип функции с {} -> {}.\n"
-            "4) Итоговый тип узла после унификации: {}.",
-            t_1->to_str(false),
-            t_2->to_str(false),
+            "Унификация дала S3 = {}.\n"
+            "Итоговый тип узла: S3({}) = {}.\n"
+            "Итоговая подстановка: S = S3 + S2 + S1 = {}.\n"
+            "Результат - (T, S).",
+            s_3.to_str(),
             beta->to_str(false),
-            t_2->to_str(false),
-            beta->to_str(false),
-            result_type->to_str(false)
+            result_type->to_str(false),
+            result_sub.to_str()
         ),
         node
     );
 
-    return Result{ result_type, s_3 + s_2 + s_1 };
+    return Result{ result_type, result_sub };
 }
 
 ResultOrError InferenceManager::W(
@@ -351,7 +393,10 @@ ResultOrError InferenceManager::W(
     LetNode::ptr_t node
 ) {
     add_algorithm_step(
-        "Вычислим тип и подстановку для значения привязки",
+        std::format(
+            "Сначала вычисляем W(e1), чтобы получить тип привязки {} и подстановку.",
+            node->bind_var->var
+        ),
         node
     );
 
@@ -368,15 +413,15 @@ ResultOrError InferenceManager::W(
     
     add_algorithm_step(
         std::format(
-            "Тип значения привязки T1: {}\n"
-            "Применяем полученную подстановку к контексту типизации\n"
-            "Обобщаем тип значения привязки относительно этого контекста.\n"
-            "Полученная схема типа: {}\n"
-            "Добавляем в контекст эту схему в связке с переменной {}\n"
-            "Вызываем W на новом контексте и возвращаемом значении let.",
+            "Получили из W(e1): T1 = {}, S1 = {}.\n"
+            "Применили S1 к контексту и обобщили T1: {}.\n"
+            "Добавили в контекст связку {}: {}.\n"
+            "Вычисляем W(e2).",
             t_1->to_str(false),
+            s_1.to_str(),
             t_1_gen->to_str(),
-            node->bind_var->var
+            node->bind_var->var,
+            t_1_gen->to_str()
         ),
         node
     );
@@ -388,23 +433,27 @@ ResultOrError InferenceManager::W(
     }
 
     auto [t_2, s_2] = res_2.unwrap();
+    auto result_sub = s_2 + s_1;
 
     add_algorithm_step(
         std::format(
-            "Полученный тип возвращаемого значения T2: {}\n"
-            "В качестве подстановки возвращаем композицию S2 и S1.",
-            t_2->to_str(false)
+            "Из W(e2) получили T2 = {} и S2 = {}.\n"
+            "Возвращаем тип T2 и композицию S = S2 + S1 = {}.",
+            t_2->to_str(false),
+            s_2.to_str(),
+            result_sub.to_str()
         ),
         node
     );
 
-    return Result{ t_2, s_2 + s_1 };
+    return Result{ t_2, result_sub };
 }
 
 ResultOrError InferenceManager::W(
     InferenceContext& gamma,
     BranchNode::ptr_t node
 ) {
+    add_algorithm_step("Унифицируем тип условия с Bool.", node);
     auto res_1 = W(gamma, node->cond_expr);
 
     if(res_1.is_error()) {
@@ -416,12 +465,24 @@ ResultOrError InferenceManager::W(
     if(res_2.is_error()) {
         auto error = res_2.get_error();
         error.at = node->loc;
+        add_algorithm_step("Унификация типа условия с Bool завершилась ошибкой.", node);
         return error;
     }
     auto s_2 = res_2.unwrap();
     auto s_2_1 = s_2 + s_1;
 
     InferenceContext new_ctx = s_2_1.apply_to(gamma);
+    add_algorithm_step(
+        std::format(
+            "Для условия получили T1 = {} и S1 = {}.\n"
+            "После унификации с Bool получили S2 = {}.\n"
+            "Вычисляем W для ветки истинности в контексте S2 + S1.",
+            t_1->to_str(false),
+            s_1.to_str(),
+            s_2.to_str()
+        ),
+        node
+    );
     auto res_3 = W(new_ctx, node->true_expr);
     if(res_3.is_error()) {
         return res_3;
@@ -430,13 +491,34 @@ ResultOrError InferenceManager::W(
 
     auto s_3_2_1 = s_3 + s_2 + s_1;
     new_ctx = s_3_2_1.apply_to(gamma);
+    add_algorithm_step(
+        std::format(
+            "Для ветки истинности получили T2 = {} и S3 = {}.\n"
+            "Передаём управление в W для ветки ложности в контексте S3 + S2 + S1.",
+            t_2->to_str(false),
+            s_3.to_str()
+        ),
+        node
+    );
     auto res_4 = W(new_ctx, node->false_expr);
     if(res_4.is_error()) {
         return res_4;
     }
     auto [t_3, s_4] = res_4.unwrap();
-
-    auto res_5 = MGU(s_4.apply_to(t_2), t_3);
+    
+    auto s_4_t_2 = s_4.apply_to(t_2);
+    add_algorithm_step(
+        std::format(
+            "Для ветки ложности получили T3 = {} и S4 = {}.\n"
+            "Унифицируем S4.T2 = {} с T3 = {}.",
+            t_3->to_str(false),
+            s_4.to_str(),
+            s_4_t_2->to_str(false),
+            t_3->to_str(false)
+        ),
+        node
+    );
+    auto res_5 = MGU(s_4_t_2, t_3);
     if(res_5.is_error()) {
         auto error = res_5.get_error();
         error.at = node->loc;
@@ -445,28 +527,28 @@ ResultOrError InferenceManager::W(
     auto s_5 = res_5.unwrap();
 
     auto result_type = s_5.apply_to(t_3);
+    auto result_sub = s_5 + s_4 + s_3 + s_2 + s_1;
     add_algorithm_step(
         std::format(
-            "Обработка ветвления if-then-else:\n"
-            "1) Тип условия: {} (должен унифицироваться с Bool).\n"
-            "2) Тип then-ветки: {}.\n"
-            "3) Тип else-ветки: {}.\n"
-            "4) После унификации then/else итоговый тип узла: {}.",
-            t_1->to_str(false),
-            t_2->to_str(false),
-            t_3->to_str(false),
-            result_type->to_str(false)
+            "Унификация дала S5 = {}.\n"
+            "Итоговый тип узла: T = S5.T3 = {}.\n"
+            "Итоговая подстановка: S = S5 + S4 + S3 + S2 + S1 = {}.\n"
+            "Возвращаем (T, S).",
+            s_5.to_str(),
+            result_type->to_str(false),
+            result_sub.to_str()
         ),
         node
     );
 
-    return Result{ result_type, s_5 + s_4 + s_3 + s_2 + s_1 };
+    return Result{ result_type, result_sub };
 }
 
 ResultOrError InferenceManager::W(
     InferenceContext& gamma,
     FixNode::ptr_t node
 ) {
+    add_algorithm_step("Вычисляем W для внутреннего выражения fix.", node);
     auto res_1 = W(gamma, node->func);
 
     if(res_1.is_error()) {
@@ -475,30 +557,43 @@ ResultOrError InferenceManager::W(
     auto [t_1, s_1] = res_1.unwrap();
 
     auto beta = TypeVar::generate_fresh();
+    add_algorithm_step(
+        std::format(
+            "После W получили T1 = {} и S1 = {}.\n"
+            "Вводим свежую типовую переменную b = {} и унифицируем S1.T1 с {} -> {}.",
+            t_1->to_str(false),
+            s_1.to_str(),
+            beta->to_str(false),
+            beta->to_str(false),
+            beta->to_str(false)
+        ),
+        node
+    );
     auto res_2 = MGU(s_1.apply_to(t_1), make_func_type(beta, beta));
     if(res_2.is_error()) {
         auto error = res_2.get_error();
         error.at = node->loc;
+        add_algorithm_step("Унификация в узле fix завершилась ошибкой.", node);
         return error;
     }
     auto s_2 = res_2.unwrap();
 
     auto result_type = s_2.apply_to(beta);
+    auto result_sub = s_2 + s_1;
     add_algorithm_step(
         std::format(
-            "Обработка fix-узла:\n"
-            "1) Тип внутреннего выражения: {}.\n"
-            "2) Требуем форму {} -> {} и унифицируем.\n"
-            "3) Итоговый тип fix-узла: {}.",
-            t_1->to_str(false),
-            beta->to_str(false),
-            beta->to_str(false),
-            result_type->to_str(false)
+            "Унификация дала S2 = {}.\n"
+            "Итоговый тип fix-узла: S2.b = {}.\n"
+            "Итоговая подстановка: S = S2 + S1 = {}.\n"
+            "Возвращаем (T, S).",
+            s_2.to_str(),
+            result_type->to_str(false),
+            result_sub.to_str()
         ),
         node
     );
 
-    return Result{ result_type, s_2 };
+    return Result{ result_type, result_sub };
 }
 
 ResultOrError InferenceManager::W(
@@ -530,22 +625,29 @@ SubstitutionOrError InferenceManager::M(
     Type::base_ptr_t expected
 ) {
     auto const_type = make_const_type(node->type);
+
+    add_algorithm_step(
+        std::format(
+            "Унифицируем тип {} с ожидаемым типом {}.\n",
+            const_type->to_str(false),
+            expected->to_str(false)
+        ),
+        node
+    );
+
     auto result = MGU(expected, const_type);
     if(result.is_error()) {
         auto error = result.get_error();
         error.at = node->loc;
+
+        add_algorithm_step("Унификация завершилась ошибкой.", node);
         return error;
     }
 
     add_algorithm_step(
         std::format(
-            "M-алгоритм для константы {}:\n"
-            "1) Ожидаемый тип: {}.\n"
-            "2) Фактический тип константы: {}.\n"
-            "3) Унификация успешна.",
-            node->value,
-            expected->to_str(false),
-            const_type->to_str(false)
+            "Унификация успешна, полученная подстановка: S = {}.",
+            result.unwrap().to_str()
         ),
         node
     );
@@ -555,30 +657,45 @@ SubstitutionOrError InferenceManager::M(
 
 SubstitutionOrError InferenceManager::M(InferenceContext& gamma, VarNode::ptr_t node, Type::base_ptr_t expected) {
     if(!gamma.has(node->var)) {
+        add_algorithm_step(
+            std::format(
+                "Типовая переменная {} отсутствует в контексте типизации, завершаем алгоритм ошибкой.",
+                node->var
+            ),
+            node
+        );
         return Error{.text = "неизвестная типовая переменная " + node->var, .at = node->loc};
     }
         
     TypeScheme::ptr_t scheme = gamma.get(node->var).second;
     auto inst = scheme->instantiate();
+    
+    add_algorithm_step(
+        std::format(
+            "Для переменной {} в контексте найдена схема {}.\n"
+            "Получаем её экземпляр: {}\n"
+            "Унифицируем ожидаемый тип {} с этим экземпляром.",
+            node->var,
+            scheme->to_str(),
+            inst->to_str(false),
+            expected->to_str(false)
+        ),
+        node
+    );
+
     auto result = MGU(expected, inst);
 
     if(result.is_error()) {
         auto error = result.get_error();
         error.at = node->loc;
+        add_algorithm_step("Унификация завершилась ошибкой.", node);
         return error;
     }
 
     add_algorithm_step(
         std::format(
-            "M-алгоритм для переменной {}:\n"
-            "1) Ожидаемый тип: {}.\n"
-            "2) Схема из контекста: {}.\n"
-            "3) Экземпляр схемы: {}.\n"
-            "4) Унификация ожидаемого типа и экземпляра успешна.",
-            node->var,
-            expected->to_str(false),
-            scheme->to_str(),
-            inst->to_str(false)
+            "Полученная подстановка: S = {}.",
+            result.unwrap().to_str()
         ),
         node
     );
@@ -589,11 +706,23 @@ SubstitutionOrError InferenceManager::M(InferenceContext& gamma, VarNode::ptr_t 
 SubstitutionOrError InferenceManager::M(InferenceContext& gamma, FuncNode::ptr_t node, Type::base_ptr_t expected) {
     auto b_1 = TypeVar::generate_fresh(), b_2 = TypeVar::generate_fresh();
     auto func_type = make_func_type(b_1, b_2);
+    add_algorithm_step(
+        std::format(
+            "Создаём новые переменные b1 = {} и b2 = {}\n"
+            "Унифицируем ожидаемый тип {} с функциональным типом вида {}.",
+            b_1->to_str(false),
+            b_2->to_str(false),
+            expected->to_str(false),
+            func_type->to_str(false)
+        ),
+        node
+    );
     auto result_1 = MGU(expected, func_type);
 
     if(result_1.is_error()) {
         auto error = result_1.get_error();
         error.at = node->loc;
+        add_algorithm_step("Унификация ожидаемого типа с функциональным видом завершилась ошибкой.", node);
         return error;
     }
     auto s_1 = result_1.unwrap();
@@ -607,6 +736,18 @@ SubstitutionOrError InferenceManager::M(InferenceContext& gamma, FuncNode::ptr_t
         ))
     );
     auto s_1_b_2 = s_1.apply_to(b_2);
+    add_algorithm_step(
+        std::format(
+            "Получили S1 = {}.\n"
+            "Конкретизировали контекст этой подстановкой, добавили в него связку {} и {}.\n"
+            "Вычисляем M для тела, ожидаемый тип - применение S1 к b1 {}.",
+            s_1.to_str(),
+            node->param->var,
+            s_1_b_1->to_str(false),
+            s_1_b_2->to_str(false)
+        ),
+        node
+    );
     auto result_2 = M(new_ctx, node->body, s_1_b_2);
 
     if(result_2.is_error()) {
@@ -617,14 +758,11 @@ SubstitutionOrError InferenceManager::M(InferenceContext& gamma, FuncNode::ptr_t
     auto result_sub = s_2 + s_1;
     add_algorithm_step(
         std::format(
-            "M-алгоритм для λ-узла λ{}.body:\n"
-            "1) Ожидаемый тип приводим к функциональному виду b1 -> b2.\n"
-            "2) Параметру назначаем тип {}.\n"
-            "3) Тело проверяем с ожиданием {}.\n"
-            "4) Получаем итоговую композицию подстановок для узла.",
-            node->param->var,
-            s_1_b_1->to_str(false),
-            s_1_b_2->to_str(false)
+            "После проверки тела получили S2 = {}.\n"
+            "Итоговая подстановка узла: S = S2 + S1 = {}.\n"
+            "Возвращаем S.",
+            s_2.to_str(),
+            result_sub.to_str()
         ),
         node
     );
@@ -634,73 +772,118 @@ SubstitutionOrError InferenceManager::M(InferenceContext& gamma, FuncNode::ptr_t
 
 SubstitutionOrError InferenceManager::M(InferenceContext& gamma, AppNode::ptr_t node, Type::base_ptr_t expected) {
     auto beta = TypeVar::generate_fresh();
+    add_algorithm_step(
+        std::format(
+            "Создаём новую переменную b = {}\n"
+            "Вычисляем M для функции e1 с ожиданием {} -> {}.",
+            beta->to_str(false),
+            beta->to_str(false),
+            expected->to_str(false)
+        ),
+        node
+    );
     auto result_1 = M(gamma, node->func, make_func_type(beta, expected));
 
-    if(result_1.is_error())
+    if(result_1.is_error()) {
         return result_1;
+    }
     auto s_1 = result_1.unwrap();
 
     auto new_ctx = s_1.apply_to(gamma);
     auto s_1_beta = s_1.apply_to(beta);
-    auto result_2 = M(new_ctx, node->arg, s_1_beta);
-
-    if(result_2.is_error())
-        return result_2;
-    auto s_2 = result_2.unwrap();
-
     add_algorithm_step(
         std::format(
-            "M-алгоритм для применения (e1 e2):\n"
-            "1) Для функции ожидаем тип {} -> {}.\n"
-            "2) После первой подстановки проверяем аргумент с ожиданием {}.\n"
-            "3) Комбинируем подстановки, получая результат для узла.",
-            beta->to_str(false),
-            expected->to_str(false),
+            "Из M(e1) получили S1 = {}.\n"
+            "Конкретизируем контекст этой подстановкой.\n"
+            "Вычисляем M для аргумента e2 с ожиданием, конкретизированным S1: {}.",
+            s_1.to_str(),
             s_1_beta->to_str(false)
         ),
         node
     );
+    auto result_2 = M(new_ctx, node->arg, s_1_beta);
 
-    return s_2 + s_1;
-}
-
-SubstitutionOrError InferenceManager::M(InferenceContext& gamma, LetNode::ptr_t node, Type::base_ptr_t expected) {
-    auto beta = TypeVar::generate_fresh();
-    auto result_1 = M(gamma, node->bind_value, beta);
-
-    if(result_1.is_error())
-        return result_1;
-    auto s_1 = result_1.unwrap();
-
-    auto new_ctx = s_1.apply_to(gamma);
-    auto s_t_1 = s_1.apply_to(beta);
-    new_ctx.set(node->bind_var->var, new_ctx.generalize(s_t_1));
-
-    auto s_1_expected = s_1.apply_to(expected);
-    auto result_2 = M(new_ctx, node->ret_value, s_1_expected);
-
-    if(result_2.is_error())
+    if(result_2.is_error()) {
         return result_2;
+    }
     auto s_2 = result_2.unwrap();
+    auto result_sub = s_2 + s_1;
 
     add_algorithm_step(
         std::format(
-            "M-алгоритм для let-узла let {} = e1 in e2:\n"
-            "1) Проверяем e1 против свежего типа {}.\n"
-            "2) Обобщаем полученный тип и расширяем контекст.\n"
-            "3) Проверяем e2 против ожидаемого типа {} (с учётом подстановки).\n"
-            "4) Итог — композиция подстановок текущего узла.",
-            node->bind_var->var,
-            beta->to_str(false),
-            s_1_expected->to_str(false)
+            "Из M(e2) получили S2 = {}.\n"
+            "Итоговая подстановка узла: S = S2 + S1 = {}.\n"
+            "Возвращаем S.",
+            s_2.to_str(),
+            result_sub.to_str()
         ),
         node
     );
 
-    return s_2 + s_1;
+    return result_sub;
+}
+
+SubstitutionOrError InferenceManager::M(InferenceContext& gamma, LetNode::ptr_t node, Type::base_ptr_t expected) {
+    auto beta = TypeVar::generate_fresh();
+    add_algorithm_step(
+        std::format(
+            "Вычисляем M для выражения привязки e1 с ожиданием свежего типа {}.",
+            beta->to_str(false)
+        ),
+        node
+    );
+    auto result_1 = M(gamma, node->bind_value, beta);
+
+    if(result_1.is_error()) {
+        return result_1;
+    }
+    auto s_1 = result_1.unwrap();
+
+    auto new_ctx = s_1.apply_to(gamma);
+    auto s_t_1 = s_1.apply_to(beta);
+    auto generalized = new_ctx.generalize(s_t_1);
+    new_ctx.set(node->bind_var->var, generalized);
+
+    auto s_1_expected = s_1.apply_to(expected);
+    add_algorithm_step(
+        std::format(
+            "После M(e1) получили S1 = {} и тип привязки {}.\n"
+            "Конкретизировали подстановкой S1 контекст и ожидаемый тип привязки.\n"
+            "Обобщили тип в схему {} и добавили связку {}: {}.\n"
+            "Вычисляем M для e2 с ожиданием {}.",
+            s_1.to_str(),
+            s_t_1->to_str(false),
+            generalized->to_str(),
+            node->bind_var->var,
+            generalized->to_str(),
+            s_1_expected->to_str(false)
+        ),
+        node
+    );
+    auto result_2 = M(new_ctx, node->ret_value, s_1_expected);
+
+    if(result_2.is_error()) {
+        return result_2;
+    }
+    auto s_2 = result_2.unwrap();
+    auto result_sub = s_2 + s_1;
+
+    add_algorithm_step(
+        std::format(
+            "Из M(e2) получили S2 = {}.\n"
+            "Итоговая подстановка узла: S = S2 + S1 = {}.\n"
+            "Возвращаем S.",
+            s_2.to_str(),
+            result_sub.to_str()
+        ),
+        node
+    );
+
+    return result_sub;
 }
 
 SubstitutionOrError InferenceManager::M(InferenceContext& gamma, BranchNode::ptr_t node, Type::base_ptr_t expected) {
+    add_algorithm_step("Вычисляем M для условия с ожиданием Bool.", node);
     auto result_1 = M(gamma, node->cond_expr, make_const_type("Bool"));
     if(result_1.is_error()) {
         return result_1;
@@ -710,6 +893,15 @@ SubstitutionOrError InferenceManager::M(InferenceContext& gamma, BranchNode::ptr
     auto new_ctx = s_1.apply_to(gamma);
     auto s_1_expected = s_1.apply_to(expected);
 
+    add_algorithm_step(
+        std::format(
+            "После проверки условия получили S1 = {}.\n"
+            "Вычисляем M для ветки истинности с ожиданием {}.",
+            s_1.to_str(),
+            s_1_expected->to_str(false)
+        ),
+        node
+    );
     auto result_2 = M(new_ctx, node->true_expr, s_1_expected);
     if(result_2.is_error()) {
         return result_2;
@@ -720,19 +912,51 @@ SubstitutionOrError InferenceManager::M(InferenceContext& gamma, BranchNode::ptr
     new_ctx = s_2_1.apply_to(gamma);
     auto s_2_1_expected = s_2_1.apply_to(expected);
 
+    add_algorithm_step(
+        std::format(
+            "Для ветки истинности получили S2 = {}.\n"
+            "Конкретизировали композицией S2+S1 контекст и ожидаемый тип.\n"
+            "Передаём управление в M для else-ветки с ожиданием {}.",
+            s_2.to_str(),
+            s_2_1_expected->to_str(false)
+        ),
+        node
+    );
     auto result_3 = M(new_ctx, node->false_expr, s_2_1_expected);
     if(result_3.is_error()) {
         return result_3;
     }
     auto s_3 = result_3.unwrap();
 
-    return s_3 + s_2 + s_1;
+    auto result_sub = s_3 + s_2 + s_1;
+
+    add_algorithm_step(
+        std::format(
+            "Для ветки ложности получили S3 = {}.\n"
+            "Итоговая подстановка узла: S = S3 + S2 + S1 = {}.\n"
+            "Возвращаем S.",
+            s_3.to_str(),
+            result_sub.to_str()
+        ),
+        node
+    );
+
+    return result_sub;
 }
 
 SubstitutionOrError InferenceManager::M(InferenceContext& gamma, FixNode::ptr_t node, Type::base_ptr_t expected) {
     auto beta = TypeVar::generate_fresh();
     auto func = make_func_type(beta, beta);
     
+    add_algorithm_step(
+        std::format(
+            "Создаём свежую типовую переменную b = {}\n"
+            "Вычисляем M для тела fix с ожиданием {}.",
+            beta->to_str(false),
+            func->to_str(false)
+        ),
+        node
+    );
     auto result_1 = M(gamma, node->func, func);
     if(result_1.is_error()) {
         return result_1;
@@ -742,13 +966,36 @@ SubstitutionOrError InferenceManager::M(InferenceContext& gamma, FixNode::ptr_t 
     auto s_1_expected = s_1.apply_to(expected);
     auto s_1_beta = s_1.apply_to(beta);
 
+    add_algorithm_step(
+        std::format(
+            "Для тела fix получили S1 = {}.\n"
+            "Унифицируем конкретизированные S1 ожидаемый тип {} и b {}.",
+            s_1.to_str(),
+            s_1_expected->to_str(false),
+            s_1_beta->to_str(false)
+        ),
+        node
+    );
     auto result_2 = MGU(s_1_expected, s_1_beta);
     if(result_2.is_error()) {
         return result_2;
     }
     auto s_2 = result_2.unwrap();
 
-    return s_2 + s_1;
+    auto result_sub = s_2 + s_1;
+
+    add_algorithm_step(
+        std::format(
+            "Унификация дала S2 = {}.\n"
+            "Итоговая подстановка узла: S = S2 + S1 = {}.\n"
+            "Возвращаем S.",
+            s_2.to_str(),
+            result_sub.to_str()
+        ),
+        node
+    );
+
+    return result_sub;
 }
 
 SubstitutionOrError InferenceManager::M(
@@ -798,25 +1045,25 @@ InferenceContext InferenceManager::make_basic_context() {
     auto nil = PolyTypeScheme::ptr_t(new PolyTypeScheme(
         { param },
         list
-    )); //∀α. List α
+    )); //AAα. List α
     auto cons = PolyTypeScheme::ptr_t(new PolyTypeScheme(
         { param },
         make_func_type(param, make_func_type(list, list))
-    )); //∀α. α -> List α -> List α
+    )); //AAα. α -> List α -> List α
 
     auto equal = PolyTypeScheme::ptr_t(new PolyTypeScheme(
         { param },
         make_func_type(param, make_func_type(param, bool_type))
-    )); //∀α. α -> α -> Bool
+    )); //AAα. α -> α -> Bool
 
     auto hd = PolyTypeScheme::ptr_t(new PolyTypeScheme(
         { param },
         make_func_type(list, param)
-    )); //∀α. List α -> α
+    )); //AAα. List α -> α
     auto tl = PolyTypeScheme::ptr_t(new PolyTypeScheme(
         { param },
         make_func_type(list, list)
-    )); //∀α. List α -> List α
+    )); //AAα. List α -> List α
 
     auto add = PolyTypeScheme::ptr_t(new PolyTypeScheme(
         {},
