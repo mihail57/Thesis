@@ -33,22 +33,7 @@ TypeScheme::ptr_t InferenceContext::generalize(Type::base_ptr_t& type) {
 
     for(const auto& ctx_pair: *this) {
         std::vector<TypeVar::ptr_t> ctx_term_fvs;
-        if(auto mono = std::dynamic_pointer_cast<MonoTypeScheme>(ctx_pair.second))
-            mono->type->get_vars(ctx_term_fvs);
-        else if(auto poly = std::dynamic_pointer_cast<PolyTypeScheme>(ctx_pair.second)){
-            std::vector<TypeVar::ptr_t> ctx_term_all_tvs;
-            poly->type_body->get_vars(ctx_term_all_tvs);
-
-            ctx_term_fvs.reserve(ctx_term_all_tvs.size());
-            for(const auto& ctx_term_tv : ctx_term_all_tvs) {
-                if(!std::any_of(
-                    poly->binded_type_vars.cbegin(),
-                    poly->binded_type_vars.cend(),
-                    [ctx_term_tv](const TypeVar::ptr_t& binded_tv) { return ctx_term_tv->name == binded_tv->name; }
-                ))
-                    ctx_term_fvs.push_back(ctx_term_tv);
-            }
-        }
+        ctx_pair.second->get_free_vars(ctx_term_fvs);
         
         for(const auto& ctx_term_fv: ctx_term_fvs)
             ctx_free_vars.insert(ctx_term_fv->name);

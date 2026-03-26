@@ -44,8 +44,6 @@ std::vector<std::string> serialize_flags(const Flags& flags) {
 
     if (flags.template is_flag_set<'W'>()) args.emplace_back("-W");
     if (flags.template is_flag_set<'M'>()) args.emplace_back("-M");
-    if (flags.template is_flag_set<'l'>()) args.emplace_back("-l");
-    if (flags.template is_flag_set<'h'>()) args.emplace_back("-h");
     if (flags.template is_flag_set<'f'>()) {
         args.emplace_back("-f");
         args.emplace_back(flags.template get_flag_value<'f'>().value());

@@ -9,6 +9,7 @@ struct TypeScheme {
 
     virtual Type::base_ptr_t instantiate() const = 0;
     virtual std::string to_str() const = 0;
+    virtual void get_free_vars(std::vector<TypeVar::ptr_t>& vars) const = 0;
     virtual ~TypeScheme();
 };
 
@@ -22,6 +23,7 @@ struct PolyTypeScheme : TypeScheme {
    
     virtual Type::base_ptr_t instantiate() const;
     virtual std::string to_str() const;
+    virtual void get_free_vars(std::vector<TypeVar::ptr_t>& vars) const;
     ~PolyTypeScheme();
 };
 
@@ -34,6 +36,7 @@ struct MonoTypeScheme : TypeScheme {
    
     virtual Type::base_ptr_t instantiate() const;
     virtual std::string to_str() const;
+    virtual void get_free_vars(std::vector<TypeVar::ptr_t>& vars) const;
     ~MonoTypeScheme();
 };
 

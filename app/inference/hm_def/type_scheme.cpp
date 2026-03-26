@@ -32,6 +32,21 @@ std::string PolyTypeScheme::to_str() const {
     return ss.str();
 }
 
+void PolyTypeScheme::get_free_vars(std::vector<TypeVar::ptr_t>& vars) const {
+    std::vector<TypeVar::ptr_t> ctx_term_all_tvs;
+    type_body->get_vars(ctx_term_all_tvs);
+
+    vars.reserve(ctx_term_all_tvs.size());
+    for(const auto& ctx_term_tv : ctx_term_all_tvs) {
+        if(!std::any_of(
+            binded_type_vars.cbegin(),
+            binded_type_vars.cend(),
+            [ctx_term_tv](const TypeVar::ptr_t& binded_tv) { return ctx_term_tv->name == binded_tv->name; }
+        ))
+            vars.push_back(ctx_term_tv);
+    }
+}
+
 PolyTypeScheme::~PolyTypeScheme() {};
     
 
@@ -45,6 +60,10 @@ Type::base_ptr_t MonoTypeScheme::instantiate() const {
 
 std::string MonoTypeScheme::to_str() const {
     return type->to_str(false);
+}
+
+void MonoTypeScheme::get_free_vars(std::vector<TypeVar::ptr_t>& vars) const {
+    type->get_vars(vars);
 }
 
 MonoTypeScheme::~MonoTypeScheme() {};
