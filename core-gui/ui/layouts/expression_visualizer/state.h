@@ -19,6 +19,10 @@ struct ExpressionVisualizerState {
 	float width = 320.0f;
 	float height = 320.0f;
 
+	float pending_scroll_x = 0.0f;
+	float pending_scroll_y = 0.0f;
+	bool has_pending_scroll = false;
+
 	void reset();
 	void set_expression(std::string_view expr);
 	void request_source_highlight(const SourceLoc& loc);
