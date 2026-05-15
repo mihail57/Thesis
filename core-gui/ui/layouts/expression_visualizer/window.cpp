@@ -15,6 +15,7 @@
 constexpr float k_ast_horizontal_spacing = 28.0f;
 constexpr float k_ast_vertical_spacing = 44.0f;
 constexpr float k_ast_canvas_padding = 16.0f;
+constexpr float k_ast_detail_zoom_threshold = 0.65f;
 
 void ExpressionVisualizerState::reset() {
 	ast_root.reset();
@@ -132,18 +133,20 @@ static int build_ast_visualization_data(const AstNode::ptr_t& node, std::vector<
 	return node_index;
 }
 
-static void calculate_node_size(AstVisualNode& node) {
+static void calculate_node_size(AstVisualNode& node, bool show_details) {
 	const float line_height = ImGui::GetTextLineHeight();
 	float max_text_width = ImGui::CalcTextSize(node.title.c_str()).x;
-	for (const std::string& detail : node.details) {
-		max_text_width = std::max(max_text_width, ImGui::CalcTextSize(detail.c_str()).x);
+	if (show_details) {
+		for (const std::string& detail : node.details) {
+			max_text_width = std::max(max_text_width, ImGui::CalcTextSize(detail.c_str()).x);
+		}
 	}
 
 	const float horizontal_padding = 20.0f;
 	const float vertical_padding = 16.0f;
 	const float min_width = 120.0f;
 	const float min_height = 46.0f;
-	const float lines_count = static_cast<float>(1 + node.details.size());
+	const float lines_count = show_details ? static_cast<float>(1 + node.details.size()) : 1.0f;
 
 	node.size.x = std::max(min_width, max_text_width + horizontal_padding);
 	node.size.y = std::max(min_height, lines_count * line_height + vertical_padding);
@@ -210,11 +213,12 @@ static void draw_ast_visualizer(ExpressionVisualizerState& state) {
 	float zoom = state.zoom_factor;
 	zoom = std::clamp(zoom, 0.4f, 1.0f);
 	const float helper_area_height = ImGui::GetTextLineHeightWithSpacing() * 2.0f;
+	const bool show_details = zoom >= k_ast_detail_zoom_threshold;
 
 	std::vector<AstVisualNode> nodes;
 	const int root_index = build_ast_visualization_data(root_node, nodes);
 	for (AstVisualNode& node : nodes) {
-		calculate_node_size(node);
+		calculate_node_size(node, show_details);
 		node.size.x *= zoom;
 		node.size.y *= zoom;
 	}
@@ -318,7 +322,7 @@ static void draw_ast_visualizer(ExpressionVisualizerState& state) {
 			draw_list->AddLine(ImVec2(parent_bottom.x, mid_y), ImVec2(child_top.x, mid_y), edge_color, 1.4f);
 			draw_list->AddLine(ImVec2(child_top.x, mid_y), child_top, edge_color, 1.4f);
 
-			if (edge_i < parent.edge_labels.size() && !parent.edge_labels[edge_i].empty()) {
+			if (show_details && edge_i < parent.edge_labels.size() && !parent.edge_labels[edge_i].empty()) {
 				const std::string& edge_label = parent.edge_labels[edge_i];
 				const ImVec2 label_size = ImGui::CalcTextSize(edge_label.c_str());
 				const ImVec2 label_pos = ImVec2(
@@ -345,11 +349,20 @@ static void draw_ast_visualizer(ExpressionVisualizerState& state) {
 
 		ImU32 text_col = ImGui::GetColorU32(ImGuiCol_Text);
 
-		ImVec2 text_pos = ImVec2(rect_min.x + 10.0f * zoom, rect_min.y + 7.0f * zoom);
-		draw_list->AddText(text_pos, text_col, node.title.c_str());
-		for (const std::string& detail : node.details) {
-			text_pos.y += line_height;
-			draw_list->AddText(text_pos, text_col, detail.c_str());
+		if (show_details) {
+			ImVec2 text_pos = ImVec2(rect_min.x + 10.0f * zoom, rect_min.y + 7.0f * zoom);
+			draw_list->AddText(text_pos, text_col, node.title.c_str());
+			for (const std::string& detail : node.details) {
+				text_pos.y += line_height;
+				draw_list->AddText(text_pos, text_col, detail.c_str());
+			}
+		} else {
+			ImVec2 title_size = ImGui::CalcTextSize(node.title.c_str());
+			ImVec2 text_pos = ImVec2(
+				rect_min.x + (node.size.x - title_size.x) * 0.5f,
+				rect_min.y + (node.size.y - title_size.y) * 0.5f
+			);
+			draw_list->AddText(text_pos, text_col, node.title.c_str());
 		}
 
 		ImGui::SetCursorScreenPos(rect_min);
@@ -372,10 +385,7 @@ static void draw_ast_visualizer(ExpressionVisualizerState& state) {
 	if (canvas_hovered && !io.KeyCtrl && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsAnyItemActive()) {
 		state.panning_active = true;
 	}
-	if (!io.KeyCtrl && state.panning_active && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-		state.panning_active = false;
-	}
-	if (io.KeyCtrl) {
+	if (state.panning_active && (!ImGui::IsMouseDown(ImGuiMouseButton_Left) || io.KeyCtrl)) {
 		state.panning_active = false;
 	}
 
@@ -429,15 +439,6 @@ static void draw_expression_display_field(const ExpressionVisualizerState& state
 	if (start > end) {
 		std::swap(start, end);
 	}
-
-	// Если нет активного выделения, отображаем текст целиком
-	// if (start >= end) {
-	// 	ImGui::PushTextWrapPos();
-	// 	ImGui::TextUnformatted(text.data(), text.data() + text.size());
-	// 	ImGui::PopTextWrapPos();
-	// 	ImGui::EndChild();
-	// 	return;
-	// }
 
 	// Рисуем текст вручную через DrawList с поддержкой переносов и подсветки
 	const float line_height = ImGui::GetTextLineHeight();
