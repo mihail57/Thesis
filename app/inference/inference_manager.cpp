@@ -39,7 +39,7 @@ bool InferenceManager::run_algorithm(bool detailed) {
     }
     
     if(parsed.is_error()) {
-        state.result = print_error(parsed.get_error(), state.input);
+        state.result = print_error(parsed.get_error(), state.expression);
         return false;
     }
     state.input_parsed = parsed.unwrap();
