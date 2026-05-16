@@ -2,14 +2,6 @@
 add_executable(inference-gui)
 
 
-include(FetchContent)
-
-FetchContent_Declare(
-    glfw3
-    GIT_REPOSITORY https://github.com/glfw/glfw.git
-    GIT_TAG 7b6aead9fb88b3623e3b3725ebb42670cbe4c579 #3.4
-)
-
 if(UNIX AND NOT APPLE)
     if(NOT DEFINED GLFW_BUILD_WAYLAND)
         set(GLFW_BUILD_WAYLAND ON CACHE BOOL "Build GLFW Wayland backend" FORCE)
@@ -18,6 +10,14 @@ if(UNIX AND NOT APPLE)
         set(GLFW_BUILD_X11 ON CACHE BOOL "Build GLFW X11 backend" FORCE)
     endif()
 endif()
+
+include(FetchContent)
+
+FetchContent_Declare(
+    glfw3
+    GIT_REPOSITORY https://github.com/glfw/glfw.git
+    GIT_TAG 7b6aead9fb88b3623e3b3725ebb42670cbe4c579 #3.4
+)
 
 FetchContent_MakeAvailable(glfw3)
 

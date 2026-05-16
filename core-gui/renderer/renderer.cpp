@@ -16,6 +16,7 @@
 
 #include <sstream>
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <vector>
 #include <string>
@@ -23,6 +24,7 @@
 #include <optional>
 #include <fstream>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <iostream>
 
@@ -52,7 +54,7 @@ struct RendererInternal
     #ifdef _DEBUG
     #define APP_USE_VULKAN_DEBUG_REPORT
     VkDebugReportCallbackEXT g_DebugReport      = VK_NULL_HANDLE;
-    #endif
+#endif
 
     GLFWwindow*              window;
     ImVec4                   clear_color        = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
@@ -440,6 +442,111 @@ static std::string to_lower(std::string value) {
     return value;
 }
 
+static bool env_flag_is_true(const std::optional<std::string>& value) {
+    if (!value.has_value())
+        return false;
+
+    const std::string lower = to_lower(*value);
+    return lower == "1" || lower == "true" || lower == "yes" || lower == "on";
+}
+
+static std::string trim_copy(const std::string& value) {
+    const size_t start = value.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos)
+        return "";
+
+    const size_t end = value.find_last_not_of(" \t\r\n");
+    return value.substr(start, end - start + 1);
+}
+
+static std::optional<std::string> run_command_capture_first_line(const char* command) {
+#if defined(__linux__)
+    FILE* pipe = popen(command, "r");
+    if (pipe == nullptr)
+        return std::nullopt;
+
+    std::array<char, 512> buffer{};
+    std::string output;
+    if (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr)
+        output = trim_copy(buffer.data());
+
+    const int status = pclose(pipe);
+    if (status != 0 || output.empty())
+        return std::nullopt;
+
+    return output;
+#else
+    (void)command;
+    return std::nullopt;
+#endif
+}
+
+static std::optional<bool> try_detect_linux_theme_from_gsettings() {
+#if defined(__linux__)
+    if (const auto color_scheme = run_command_capture_first_line("gsettings get org.gnome.desktop.interface color-scheme 2>/dev/null")) {
+        const std::string lower = to_lower(*color_scheme);
+        if (lower.find("prefer-dark") != std::string::npos)
+            return true;
+        if (lower.find("prefer-light") != std::string::npos)
+            return false;
+    }
+
+    if (const auto gtk_theme = run_command_capture_first_line("gsettings get org.gnome.desktop.interface gtk-theme 2>/dev/null")) {
+        const std::string lower = to_lower(*gtk_theme);
+        if (lower.find("dark") != std::string::npos)
+            return true;
+        return false;
+    }
+#endif
+    return std::nullopt;
+}
+
+static std::optional<bool> try_detect_linux_theme_from_kde() {
+#if defined(__linux__)
+    std::vector<std::filesystem::path> config_roots;
+    if (const auto xdg_config_home = get_env_value("XDG_CONFIG_HOME"))
+        config_roots.emplace_back(*xdg_config_home);
+    if (const auto home = get_env_value("HOME"))
+        config_roots.emplace_back(std::filesystem::path(*home) / ".config");
+
+    for (const auto& root : config_roots) {
+        std::ifstream in(root / "kdeglobals");
+        if (!in.is_open())
+            continue;
+
+        std::string line;
+        bool in_general_section = false;
+        while (std::getline(in, line)) {
+            const std::string trimmed = trim_copy(line);
+            if (trimmed.empty() || trimmed[0] == '#' || trimmed[0] == ';')
+                continue;
+
+            if (trimmed.front() == '[' && trimmed.back() == ']') {
+                in_general_section = (to_lower(trimmed) == "[general]");
+                continue;
+            }
+
+            if (!in_general_section)
+                continue;
+
+            const size_t equals_pos = trimmed.find('=');
+            if (equals_pos == std::string::npos)
+                continue;
+
+            const std::string key = to_lower(trim_copy(trimmed.substr(0, equals_pos)));
+            if (key != "colorscheme")
+                continue;
+
+            const std::string value = to_lower(trim_copy(trimmed.substr(equals_pos + 1)));
+            if (value.find("dark") != std::string::npos)
+                return true;
+            return false;
+        }
+    }
+#endif
+    return std::nullopt;
+}
+
 static std::optional<bool> try_detect_linux_theme_from_gtk() {
 #if defined(__linux__)
     std::vector<std::filesystem::path> config_roots;
@@ -501,9 +608,34 @@ static std::optional<bool> is_dark_system_theme() {
         return false;
     }
 
+    if (const auto gsettings = try_detect_linux_theme_from_gsettings())
+        return gsettings;
+
+    if (const auto kde = try_detect_linux_theme_from_kde())
+        return kde;
+
     return try_detect_linux_theme_from_gtk();
 #else
     return std::nullopt;
+#endif
+}
+
+static void configure_linux_glfw_platform() {
+#if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
+    const bool is_wsl = (std::getenv("WSL_DISTRO_NAME") != nullptr || std::getenv("WSL_INTEROP") != nullptr);
+    const bool has_x11_display = (std::getenv("DISPLAY") != nullptr);
+
+    bool prefer_x11 = false;
+    if (const auto session_type = get_env_value("XDG_SESSION_TYPE")) {
+        const std::string lower = to_lower(*session_type);
+        if (lower == "x11")
+            prefer_x11 = true;
+        else if (lower == "wayland" && has_x11_display)
+            prefer_x11 = true;
+    }
+
+    if (is_wsl || prefer_x11)
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
 #endif
 }
 
@@ -602,14 +734,10 @@ void setup_imgui(GLFWwindow* window, UiInitStruct& app_state) {
 
 Renderer::Renderer(UiInitStruct& app_state) {
     state = new RendererInternal();
+    constexpr const char* app_window_title = "Интерактивный вывод типов";
 
     glfwSetErrorCallback(glfw_error_callback);
-#if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
-    // In WSLg/Wayland server-side decorations may be unavailable; X11 usually provides standard frame/buttons.
-    if (std::getenv("WSL_DISTRO_NAME") != nullptr || std::getenv("WSL_INTEROP") != nullptr) {
-        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-    }
-#endif
+    configure_linux_glfw_platform();
     if (!glfwInit()) {
         Renderer::show_error("Failed to initialize GLFW", "GLFW");
         delete state;
@@ -620,8 +748,16 @@ Renderer::Renderer(UiInitStruct& app_state) {
     // Create window with Vulkan context
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
+#if defined(__linux__)
+#ifdef GLFW_X11_CLASS_NAME
+    glfwWindowHintString(GLFW_X11_CLASS_NAME, "inference-gui");
+#endif
+#ifdef GLFW_X11_INSTANCE_NAME
+    glfwWindowHintString(GLFW_X11_INSTANCE_NAME, "inference-gui");
+#endif
+#endif
     float main_scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor()); // Valid on GLFW 3.3+ only
-    state->window = glfwCreateWindow((int)(1280 * main_scale), (int)(800 * main_scale), "Интерактивный вывод типов", nullptr, nullptr);
+    state->window = glfwCreateWindow((int)(1280 * main_scale), (int)(800 * main_scale), app_window_title, nullptr, nullptr);
     if (state->window == nullptr) {
         Renderer::show_error("Failed to create GLFW window", "GLFW");
         glfwTerminate();
@@ -629,6 +765,9 @@ Renderer::Renderer(UiInitStruct& app_state) {
         state = nullptr;
         return;
     }
+#if defined(__linux__)
+    glfwSetWindowTitle(state->window, app_window_title);
+#endif
     if (!glfwVulkanSupported())
     {
         Renderer::show_error("GLFW: Vulkan Not Supported", "Vulkan");
