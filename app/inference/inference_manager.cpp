@@ -204,18 +204,19 @@ ResultOrError InferenceManager::W(
     InferenceContext& gamma,
     ConstNode::ptr_t node
 ) {
+    auto id = Substitution::make_identity();
     add_algorithm_step(
         std::format(
-            "Тип узла берём из аннотации константы {}: {}.\n"
+            "Получаем тип константы {}: {}.\n"
             "Подстановка не добавляет новых ограничений: S = {}.",
             node->value,
             node->type,
-            Substitution::make_identity().to_str()
+            id.to_str()
         ),
         node
     );
 
-    return Result{ make_const_type(node->type), Substitution::make_identity() };
+    return Result{ make_const_type(node->type), id };
 }
 
 ResultOrError InferenceManager::W(
@@ -239,7 +240,7 @@ ResultOrError InferenceManager::W(
         std::format(
             "Находим схему типа переменной {} в контексте: {}.\n"
             "Инстанцируем схему, получаем мономорфный тип: {}.\n"
-            "Новых ограничений не появилось, подстановка остаётся тождественной: S = {}.",
+            "Подстановка остаётся тождественной: S = {}.",
             node->var,
             scheme->to_str(),
             inst->to_str(false),
@@ -270,7 +271,7 @@ ResultOrError InferenceManager::W(
         std::format(
             "Создаём свежую типовую переменную {} для аргумента {}.\n"
             "Расширяем контекст связкой {}: {}.\n"
-            "Вызываем W на теле функции.",
+            "Вызываем W для тела функции.",
             node->param->var,
             beta->to_str(false),
             node->param->var,
@@ -295,7 +296,7 @@ ResultOrError InferenceManager::W(
         std::format(
             "Получили T_body = {} и S1 = {}.\n"
             "Применяем S1 к типу параметра {} и получаем тип аргумента {}.\n"
-            "Собираем итоговый тип функции {}.\n"
+            "Итоговый тип функции: {}.\n"
             "Возвращаем пару ({} , S1).",
             t_1->to_str(false),
             s_1.to_str(),
@@ -340,23 +341,24 @@ ResultOrError InferenceManager::W(
     }
 
     auto [t_2, s_2] = res_2.unwrap();
+    auto s_2_t_1 = s_2.apply_to(t_1);
 
     auto beta = TypeVar::generate_fresh();
     add_algorithm_step(
         std::format(
             "После W(e2) получили T2 = {} и S2 = {}.\n"
-            "Вводим свежий тип результата {} и унифицируем S2(T1) = {} с {} -> {}.",
+            "Вводим свежий тип результата {} и унифицируем S2.T1 = {} с {} -> {}.",
             t_2->to_str(false),
             s_2.to_str(),
             beta->to_str(false),
-            s_2.apply_to(t_1)->to_str(false),
+            s_2_t_1->to_str(false),
             t_2->to_str(false),
             beta->to_str(false)
         ),
         node
     );
     auto res_3 = MGU(
-        s_2.apply_to(t_1), 
+        s_2_t_1, 
         make_func_type(t_2, beta)
     );
 
@@ -374,7 +376,7 @@ ResultOrError InferenceManager::W(
     add_algorithm_step(
         std::format(
             "Унификация дала S3 = {}.\n"
-            "Итоговый тип узла: S3({}) = {}.\n"
+            "Итоговый тип узла: S3.{} = {}.\n"
             "Итоговая подстановка: S = S3 + S2 + S1 = {}.\n"
             "Результат - (T, S).",
             s_3.to_str(),
@@ -560,7 +562,7 @@ ResultOrError InferenceManager::W(
     add_algorithm_step(
         std::format(
             "После W получили T1 = {} и S1 = {}.\n"
-            "Вводим свежую типовую переменную b = {} и унифицируем S1.T1 с {} -> {}.",
+            "Вводим свежую типовую переменную {} и унифицируем S1.T1 с {} -> {}.",
             t_1->to_str(false),
             s_1.to_str(),
             beta->to_str(false),
@@ -583,10 +585,11 @@ ResultOrError InferenceManager::W(
     add_algorithm_step(
         std::format(
             "Унификация дала S2 = {}.\n"
-            "Итоговый тип fix-узла: S2.b = {}.\n"
+            "Итоговый тип fix-узла: S2.{} = {}.\n"
             "Итоговая подстановка: S = S2 + S1 = {}.\n"
             "Возвращаем (T, S).",
             s_2.to_str(),
+            beta->to_str(),
             result_type->to_str(false),
             result_sub.to_str()
         ),
