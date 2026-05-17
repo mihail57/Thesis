@@ -180,7 +180,7 @@ Token TokenBuffer::next_token() {
     skip_indent();
 
     if (pos >= data.size())
-        return Token(TokenKind::EOF_T, "", SourceLoc(data.size(), data.size() + 1));
+        return Token(TokenKind::EOF_T, "", SourceLoc(data.size(), data.size()));
 
     auto c = next_symbol();
 

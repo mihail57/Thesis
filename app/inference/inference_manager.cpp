@@ -11,6 +11,8 @@
 
 Type::base_ptr_t get_type(const Result& v) { return std::get<0>(v); }
 
+constexpr std::uintmax_t kMaxInputFileSizeBytes = 256 * 1024;
+
 
 bool InferenceManager::run_algorithm(bool detailed) {
     this->detailed = detailed;
@@ -22,7 +24,29 @@ bool InferenceManager::run_algorithm(bool detailed) {
     {
     case InputType::File:
     {
+        auto path = std::filesystem::path(state.input);
+        if(!std::filesystem::exists(path)) {
+            state.result = std::format("Ошибка: файл {} не существует.", state.input);
+            return false;
+        }
+        
+        std::error_code fs_error;
+        const auto file_size = std::filesystem::file_size(state.input, fs_error);
+        if (fs_error) {
+            state.result = "Ошибка: не удалось получить размер входного файла.";
+            return false;
+        }
+        if (file_size > kMaxInputFileSizeBytes) {
+            state.result = "Ошибка: размер входного файла превышает 256 KiB.";
+            return false;
+        }
+
         auto ifstream = std::ifstream(state.input);
+        if (!ifstream.is_open()) {
+            state.result = "Ошибка: не удалось открыть входной файл.";
+            return false;
+        }
+
         state.expression = std::string(std::istreambuf_iterator<char>{ifstream}, {});
         parsed = LambdaParser(state.expression).parse();
         break;
@@ -524,6 +548,7 @@ ResultOrError InferenceManager::W(
     if(res_5.is_error()) {
         auto error = res_5.get_error();
         error.at = node->loc;
+        add_algorithm_step("Унификация завершилась ошибкой.", node);
         return error;
     }
     auto s_5 = res_5.unwrap();
@@ -981,6 +1006,9 @@ SubstitutionOrError InferenceManager::M(InferenceContext& gamma, FixNode::ptr_t 
     );
     auto result_2 = MGU(s_1_expected, s_1_beta);
     if(result_2.is_error()) {
+        auto error = result_2.get_error();
+        error.at = node->loc;
+        add_algorithm_step("Унификация завершилась ошибкой.", node);
         return result_2;
     }
     auto s_2 = result_2.unwrap();
@@ -1022,20 +1050,6 @@ SubstitutionOrError InferenceManager::M(
         return M(gamma, fix_node, expected);
     
     return Error{.text = "неизвестный тип узла АСД", .at = node->loc};
-}
-
-
-std::string InferenceManager::highlight_loc(const std::string& source, const SourceLoc& loc) {
-    SourceLoc::pos_t source_show_start = 0;
-    SourceLoc::pos_t source_show_end   = source.size();
-
-    std::ostringstream ss;
-    ss << source.substr(source_show_start, source_show_end - source_show_start) << std::endl;
-    for(auto i = source_show_start; i <= source_show_end; i++) { 
-        if(i >= loc.start && i < loc.end) ss << '~';
-        else ss << ' ';
-    }
-    return ss.str();
 }
 
 InferenceContext InferenceManager::make_basic_context() {    
@@ -1147,11 +1161,84 @@ InferenceContext InferenceManager::make_basic_context() {
     return tctx;
 }
 
-std::string InferenceManager::print_error(const Error& error, const std::string& source) {
+
+
+std::string InferenceManager::highlight_loc(const std::string& source, const SourceLoc& loc) {
     std::ostringstream ss;
-    ss << error.text << std::endl;
-    ss << highlight_loc(source, error.at) << std::endl;
+
+    const auto bounded_start = std::min(loc.start, source.size());
+    const auto bounded_end = std::min(std::max(loc.end, bounded_start), source.size());
+    const bool is_point_loc = bounded_start == bounded_end;
+
+    auto line_start = source.begin();
+    std::size_t line_number = 1;
+
+    while (line_start != source.end()) {
+        auto line_end = line_start;
+        while (line_end != source.end() && *line_end != '\n') {
+            ++line_end;
+        }
+
+        const auto current_start = static_cast<SourceLoc::pos_t>(std::distance(source.begin(), line_start));
+        const auto current_end = static_cast<SourceLoc::pos_t>(std::distance(source.begin(), line_end));
+        const bool overlaps_loc = is_point_loc
+            ? (bounded_start >= current_start && bounded_start <= current_end)
+            : (current_start < bounded_end && current_end > bounded_start);
+
+        if (overlaps_loc) {
+            const auto line_text = std::string(line_start, line_end);
+            const auto highlight_start = std::max(bounded_start, current_start);
+            const auto highlight_end = std::min(bounded_end, current_end);
+
+            ss << line_number << " | " << line_text << '\n';
+            ss << "  | ";
+
+            if (is_point_loc) {
+                for (SourceLoc::pos_t pos = current_start; pos < current_end; ++pos) {
+                    if (pos == bounded_start) {
+                        ss << '^';
+                    } else {
+                        ss << ' ';
+                    }
+                }
+                if (bounded_start == current_end) {
+                    ss << '^';
+                }
+            } else {
+                for (SourceLoc::pos_t pos = current_start; pos < current_end; ++pos) {
+                    if (pos >= highlight_start && pos < highlight_end) {
+                        ss << '~';
+                    } else {
+                        ss << ' ';
+                    }
+                }
+            }
+
+            ss << '\n';
+
+            if (is_point_loc) {
+                break;
+            }
+        }
+
+        if (line_end == source.end()) {
+            break;
+        }
+
+        line_start = line_end + 1;
+        ++line_number;
+    }
+
     return ss.str();
+}
+
+std::string InferenceManager::print_error(const Error& error, const std::string& source) {
+    const auto highlighted = highlight_loc(source, error.at);
+    if (highlighted.empty()) {
+        return error.text;
+    }
+
+    return error.text + '\n' + highlighted;
 }
 
 

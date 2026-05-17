@@ -225,11 +225,6 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    if(parsed_flags.is_flag_set<'f'>() && !std::filesystem::exists(std::filesystem::path(parsed_flags.get_flag_value<'f'>().value()))) {
-        std::cerr << "Указанный файл не найден: " << parsed_flags.get_flag_value<'f'>().value() << ".\n\n" << flag_parser.help_string(argv[0]) << std::endl;
-        return -1;
-    }
-
     if(parsed_flags.is_flag_set<'g'>()) {
         if(!launch_gui(parsed_flags)) {
             std::cerr << "Не удалось запустить inference-gui из директории текущего исполняемого файла." << std::endl;

@@ -103,7 +103,7 @@ static std::optional<std::string> OpenFileDialog() {
 static void set_ui_state_from_inf_mgr_state(MainWindowState& window, const InferenceManagerState& inf_mgr_state) {
 	if(window.input_type == InputType::File)
 		CopyStringToBuffer(window.file_path, inf_mgr_state.input);
-	else
+	else if(window.input_type == InputType::Text)
 		CopyStringToBuffer(window.expression_input, inf_mgr_state.input);
 	
 	window.expr_vis_state.set_expression(inf_mgr_state.expression);

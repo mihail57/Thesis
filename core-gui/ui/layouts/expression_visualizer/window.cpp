@@ -455,6 +455,30 @@ static void draw_expression_display_field(const ExpressionVisualizerState& state
 	const char* text_begin = text.data();
 	const char* text_end = text_begin + text.size();
 	const char* line_begin = text_begin;
+
+	auto next_utf8_codepoint_end = [](const char* begin, const char* end) {
+		if (begin >= end) {
+			return begin;
+		}
+
+		const unsigned char lead = static_cast<unsigned char>(*begin);
+		std::size_t byte_count = 1;
+		if ((lead & 0x80u) == 0u) {
+			byte_count = 1;
+		} else if ((lead & 0xE0u) == 0xC0u) {
+			byte_count = 2;
+		} else if ((lead & 0xF0u) == 0xE0u) {
+			byte_count = 3;
+		} else if ((lead & 0xF8u) == 0xF0u) {
+			byte_count = 4;
+		}
+
+		const std::size_t remaining = static_cast<std::size_t>(end - begin);
+		if (byte_count > remaining) {
+			byte_count = remaining;
+		}
+		return begin + byte_count;
+	};
 	
 	while (line_begin < text_end) {
 		// Находим конец строки
@@ -472,29 +496,26 @@ static void draw_expression_display_field(const ExpressionVisualizerState& state
 			current_pos.y += line_height;
 		}
 		
-		// Рисуем строку посимвольно с выделением нужных символов
+		// Рисуем строку кодпоинтами с выделением нужных байтовых диапазонов
 		int line_start_pos = static_cast<int>(line_begin - text_begin);
 		int line_end_pos = static_cast<int>(line_end - text_begin);
 		
-		for (int i = line_start_pos; i < line_end_pos; ++i) {
-			char ch = text_begin[i];
-			std::string ch_str(1, ch);
-			ImVec2 ch_size = ImGui::CalcTextSize(ch_str.c_str());
-			
-			// Проверяем, находится ли символ в диапазоне выделения
-			ImU32 ch_color = (i >= start && i < end && highlight_active) ? highlight_color : normal_color;
-			
-			draw_list->AddText(current_pos, ch_color, ch_str.c_str());
-			current_pos.x += ch_size.x;
-			
-			// Если следующий символ не умещается, переносим на новую строку
-			if (i + 1 < line_end_pos) {
-				ImVec2 next_ch_size = ImGui::CalcTextSize(std::string(1, text_begin[i + 1]).c_str());
-				if (current_pos.x + next_ch_size.x > text_start_pos.x + wrap_width) {
-					current_pos.x = text_start_pos.x;
-					current_pos.y += line_height;
-				}
+		for (const char* glyph_begin = line_begin; glyph_begin < line_end; ) {
+			const char* glyph_end = next_utf8_codepoint_end(glyph_begin, line_end);
+			const int glyph_start_pos = static_cast<int>(glyph_begin - text_begin);
+			const int glyph_end_pos = static_cast<int>(glyph_end - text_begin);
+			const bool glyph_is_highlighted = highlight_active && glyph_start_pos < end && glyph_end_pos > start;
+			const ImU32 glyph_color = glyph_is_highlighted ? highlight_color : normal_color;
+			ImVec2 glyph_size = ImGui::CalcTextSize(glyph_begin, glyph_end);
+
+			if (current_pos.x + glyph_size.x > text_start_pos.x + wrap_width && current_pos.x > text_start_pos.x) {
+				current_pos.x = text_start_pos.x;
+				current_pos.y += line_height;
 			}
+
+			draw_list->AddText(current_pos, glyph_color, glyph_begin, glyph_end);
+			current_pos.x += glyph_size.x;
+			glyph_begin = glyph_end;
 		}
 		
 		// Переходим на новую строку
