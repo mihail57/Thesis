@@ -667,6 +667,7 @@ bool load_main_font(GLFWwindow* window) {
     };
 #elif defined(__linux__)
     candidates = {
+        "/usr/share/fonts/truetype/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",

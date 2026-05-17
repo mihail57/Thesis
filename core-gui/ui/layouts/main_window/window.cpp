@@ -25,6 +25,36 @@
 #include <string>
 #include <vector>
 
+#if defined(__linux__)
+#include <array>
+
+static std::optional<std::string> ReadDialogOutput(const char* command) {
+	FILE* f = popen(command, "r");
+	if (!f) {
+		return std::nullopt;
+	}
+
+	char buffer[1024];
+	std::optional<std::string> result;
+	if (fgets(buffer, sizeof(buffer), f) != nullptr) {
+		result = std::string(buffer);
+		if (!result->empty() && result->back() == '\n') {
+			result->pop_back();
+		}
+	}
+
+	pclose(f);
+	return result;
+}
+
+static bool IsCommandAvailable(const char* executable) {
+	std::string probe = "command -v ";
+	probe += executable;
+	probe += " >/dev/null 2>&1";
+	return std::system(probe.c_str()) == 0;
+}
+#endif
+
 
 static std::optional<std::string> OpenFileDialog() {
 #if defined(_WIN32)
@@ -45,19 +75,25 @@ static std::optional<std::string> OpenFileDialog() {
         return std::string(filename);
     }
 #elif defined(__linux__)
-    FILE* f = popen("zenity --file-selection", "r");
-    if (f) {
-        char buffer[1024];
-        if (fgets(buffer, sizeof(buffer), f) != nullptr) {
-            std::string result(buffer);
-            if (!result.empty() && result.back() == '\n') {
-                result.pop_back();
-            }
-            pclose(f);
-            return result;
-        }
-        pclose(f);
-    }
+	struct DialogCandidate {
+		const char* executable;
+		const char* command;
+	};
+
+	constexpr std::array<DialogCandidate, 4> dialog_candidates = {{
+		{"kdialog", "kdialog --getopenfilename"},
+		{"zenity", "zenity --file-selection"},
+		{"yad", "yad --file-selection"},
+		{"matedialog", "matedialog --file-selection"}
+	}};
+
+	for (const DialogCandidate& candidate : dialog_candidates) {
+		if (!IsCommandAvailable(candidate.executable)) {
+			continue;
+		}
+
+		return ReadDialogOutput(candidate.command);
+	}
 #endif
     return std::nullopt;
 }

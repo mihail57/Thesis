@@ -47,3 +47,8 @@ add_subdirectory(ui)
 target_sources(inference-gui PRIVATE main.cpp)
 
 target_link_libraries(inference-gui PRIVATE ui renderer app)
+
+set_target_properties(inference-gui PROPERTIES
+    BUILD_RPATH "\$ORIGIN"
+    INSTALL_RPATH "\$ORIGIN"
+)

@@ -1,5 +1,5 @@
 
-add_library(app STATIC)
+add_library(app SHARED)
 if(WIN32)
     set_target_properties(app PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
