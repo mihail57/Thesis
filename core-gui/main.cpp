@@ -77,7 +77,6 @@ bool check_flags(const Flags& flags) {
 
 int main(int argc, char** argv) {
 #if defined(__linux__)
-    // Ensure X11/locale-dependent APIs treat UTF-8 strings correctly (e.g. window title in taskbars).
     std::setlocale(LC_ALL, "");
 #endif
 

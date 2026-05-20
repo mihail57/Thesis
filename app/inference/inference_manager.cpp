@@ -1067,6 +1067,10 @@ InferenceContext InferenceManager::make_basic_context() {
         { param },
         make_func_type(param, make_func_type(list, list))
     )); //AAα. α -> List α -> List α
+    auto append = PolyTypeScheme::ptr_t(new PolyTypeScheme(
+        { param },
+        make_func_type(list, make_func_type(list, list))
+    )); //AAα. List α -> List α -> List α
 
     auto equal = PolyTypeScheme::ptr_t(new PolyTypeScheme(
         { param },
@@ -1126,6 +1130,7 @@ InferenceContext InferenceManager::make_basic_context() {
 
     auto nil_id = make_var_node("[]", SourceLoc());
     auto cons_id = make_var_node("::", SourceLoc());
+    auto append_id = make_var_node("++", SourceLoc());
     auto equal_id = make_var_node("equal", SourceLoc());
     auto eq_op_id = make_var_node("=", SourceLoc());
     auto hd_id = make_var_node("hd", SourceLoc());
@@ -1143,6 +1148,7 @@ InferenceContext InferenceManager::make_basic_context() {
     InferenceContext tctx;
     tctx.set(nil_id->var, nil);
     tctx.set(cons_id->var, cons);
+    tctx.set(append_id->var, append);
     tctx.set(equal_id->var, equal);
     tctx.set(eq_op_id->var, equal);
     tctx.set(hd_id->var, hd);

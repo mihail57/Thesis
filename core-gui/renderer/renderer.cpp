@@ -145,12 +145,10 @@ static void setup_vulkan(RendererInternal* state, ImVector<const char*> instance
 {
     VkResult err;
 
-    // Create Vulkan Instance
     {
         VkInstanceCreateInfo create_info = {};
         create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 
-        // Enumerate available extensions
         uint32_t properties_count;
         ImVector<VkExtensionProperties> properties;
         vkEnumerateInstanceExtensionProperties(nullptr, &properties_count, nullptr);
@@ -158,7 +156,6 @@ static void setup_vulkan(RendererInternal* state, ImVector<const char*> instance
         err = vkEnumerateInstanceExtensionProperties(nullptr, &properties_count, properties.Data);
         check_vk_result(err);
 
-        // Enable required extensions
         if (is_extension_available(properties, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
             instance_extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 #ifdef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
@@ -169,7 +166,6 @@ static void setup_vulkan(RendererInternal* state, ImVector<const char*> instance
         }
 #endif
 
-        // Enabling validation layers
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
         const char* layers[] = { "VK_LAYER_KHRONOS_validation" };
         create_info.enabledLayerCount = 1;
@@ -177,13 +173,11 @@ static void setup_vulkan(RendererInternal* state, ImVector<const char*> instance
         instance_extensions.push_back("VK_EXT_debug_report");
 #endif
 
-        // Create Vulkan Instance
         create_info.enabledExtensionCount = (uint32_t)instance_extensions.Size;
         create_info.ppEnabledExtensionNames = instance_extensions.Data;
         err = vkCreateInstance(&create_info, state->g_Allocator, &state->g_Instance);
         check_vk_result(err);
 
-        // Setup the debug report callback
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
         auto f_vkCreateDebugReportCallbackEXT = (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(state->g_Instance, "vkCreateDebugReportCallbackEXT");
         IM_ASSERT(f_vkCreateDebugReportCallbackEXT != nullptr);
@@ -197,20 +191,16 @@ static void setup_vulkan(RendererInternal* state, ImVector<const char*> instance
 #endif
     }
 
-    // Select Physical Device (GPU)
     state->g_PhysicalDevice = ImGui_ImplVulkanH_SelectPhysicalDevice(state->g_Instance);
     IM_ASSERT(state->g_PhysicalDevice != VK_NULL_HANDLE);
 
-    // Select graphics queue family
     state->g_QueueFamily = ImGui_ImplVulkanH_SelectQueueFamilyIndex(state->g_PhysicalDevice);
     IM_ASSERT(state->g_QueueFamily != (uint32_t)-1);
 
-    // Create Logical Device (with 1 queue)
     {
         ImVector<const char*> device_extensions;
         device_extensions.push_back("VK_KHR_swapchain");
 
-        // Enumerate physical device extension
         uint32_t properties_count;
         ImVector<VkExtensionProperties> properties;
         vkEnumerateDeviceExtensionProperties(state->g_PhysicalDevice, nullptr, &properties_count, nullptr);
@@ -238,8 +228,6 @@ static void setup_vulkan(RendererInternal* state, ImVector<const char*> instance
         vkGetDeviceQueue(state->g_Device, state->g_QueueFamily, 0, &state->g_Queue);
     }
 
-    // Create Descriptor Pool
-    // If you wish to load e.g. additional textures you may need to alter pools sizes and maxSets.
     {
         VkDescriptorPoolSize pool_sizes[] =
         {
@@ -258,12 +246,10 @@ static void setup_vulkan(RendererInternal* state, ImVector<const char*> instance
     }
 }
 
-// All the ImGui_ImplVulkanH_XXX structures/functions are optional helpers used by the demo.
-// Your real engine/app may not use them.
 static void setup_vulkan_window(RendererInternal* state, VkSurfaceKHR surface, int width, int height)
 {
     ImGui_ImplVulkanH_Window* wd = &state->g_MainWindowData;
-    // Check for WSI support
+
     VkBool32 res;
     vkGetPhysicalDeviceSurfaceSupportKHR(state->g_PhysicalDevice, state->g_QueueFamily, surface, &res);
     if (res != VK_TRUE)
@@ -272,13 +258,11 @@ static void setup_vulkan_window(RendererInternal* state, VkSurfaceKHR surface, i
         exit(-1);
     }
 
-    // Select Surface Format
     const VkFormat requestSurfaceImageFormat[] = { VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_B8G8R8_UNORM, VK_FORMAT_R8G8B8_UNORM };
     const VkColorSpaceKHR requestSurfaceColorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR;
     wd->Surface = surface;
     wd->SurfaceFormat = ImGui_ImplVulkanH_SelectSurfaceFormat(state->g_PhysicalDevice, wd->Surface, requestSurfaceImageFormat, (size_t)IM_ARRAYSIZE(requestSurfaceImageFormat), requestSurfaceColorSpace);
 
-    // Select Present Mode
 #ifdef APP_USE_UNLIMITED_FRAME_RATE
     VkPresentModeKHR present_modes[] = { VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_FIFO_KHR };
 #else
@@ -286,7 +270,6 @@ static void setup_vulkan_window(RendererInternal* state, VkSurfaceKHR surface, i
 #endif
     wd->PresentMode = ImGui_ImplVulkanH_SelectPresentMode(state->g_PhysicalDevice, wd->Surface, &present_modes[0], IM_ARRAYSIZE(present_modes));
 
-    // Create SwapChain, RenderPass, Framebuffer, etc.
     IM_ASSERT(state->g_MinImageCount >= 2);
     ImGui_ImplVulkanH_CreateOrResizeWindow(state->g_Instance, state->g_PhysicalDevice, state->g_Device, wd, state->g_QueueFamily, state->g_Allocator, width, height, state->g_MinImageCount, 0);
 }
@@ -296,7 +279,6 @@ static void cleanup_vulkan(RendererInternal* state)
     vkDestroyDescriptorPool(state->g_Device, state->g_DescriptorPool, state->g_Allocator);
 
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
-    // Remove the debug report callback
     auto f_vkDestroyDebugReportCallbackEXT = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(state->g_Instance, "vkDestroyDebugReportCallbackEXT");
     f_vkDestroyDebugReportCallbackEXT(state->g_Instance, state->g_DebugReport, state->g_Allocator);
 #endif // APP_USE_VULKAN_DEBUG_REPORT
@@ -353,10 +335,8 @@ static void render_frame(RendererInternal* state, ImDrawData* draw_data)
         vkCmdBeginRenderPass(fd->CommandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
     }
 
-    // Record dear imgui primitives into command buffer
     ImGui_ImplVulkan_RenderDrawData(draw_data, fd->CommandBuffer);
 
-    // Submit command buffer
     vkCmdEndRenderPass(fd->CommandBuffer);
     {
         VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -397,7 +377,7 @@ static void frame_present(RendererInternal* state)
         return;
     if (err != VK_SUBOPTIMAL_KHR)
         check_vk_result(err);
-    wd->SemaphoreIndex = (wd->SemaphoreIndex + 1) % wd->SemaphoreCount; // Now we can use the next set of semaphores
+    wd->SemaphoreIndex = (wd->SemaphoreIndex + 1) % wd->SemaphoreCount;
 }
     
 
@@ -408,7 +388,7 @@ static float calculate_font_size(GLFWwindow* window) {
         glfwGetWindowSize(window, &window_w, &window_h);
 
     const float physical_h = static_cast<float>(window_h);
-    const float base_size = physical_h / 50.0f; // 800px physical height -> 16px font
+    const float base_size = physical_h / 50.0f;
     return std::clamp(base_size, 13.0f, 28.0f);
 }
 
@@ -709,6 +689,7 @@ std::string find_monospace_font() {
     };
 #elif defined(__linux__)
     candidates = {
+        "/usr/share/fonts/truetype/DejaVuSansMono.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
@@ -725,7 +706,6 @@ std::string find_monospace_font() {
 }
 
 void setup_imgui(GLFWwindow* window, UiInitStruct& app_state) {
-    // Setup Dear ImGui style based on system preference when available.
     apply_system_theme();
     load_main_font(window);
     app_state.monospace_font_path = find_monospace_font();
@@ -746,7 +726,6 @@ Renderer::Renderer(UiInitStruct& app_state) {
         return;
     }
 
-    // Create window with Vulkan context
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
 #if defined(__linux__)
@@ -757,7 +736,7 @@ Renderer::Renderer(UiInitStruct& app_state) {
     glfwWindowHintString(GLFW_X11_INSTANCE_NAME, "inference-gui");
 #endif
 #endif
-    float main_scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor()); // Valid on GLFW 3.3+ only
+    float main_scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor());
     state->window = glfwCreateWindow((int)(1280 * main_scale), (int)(800 * main_scale), app_window_title, nullptr, nullptr);
     if (state->window == nullptr) {
         Renderer::show_error("Failed to create GLFW window", "GLFW");
@@ -786,27 +765,23 @@ Renderer::Renderer(UiInitStruct& app_state) {
         extensions.push_back(glfw_extensions[i]);
     setup_vulkan(state, extensions);
 
-    // Create Window Surface
     VkSurfaceKHR surface;
     VkResult err = glfwCreateWindowSurface(state->g_Instance, state->window, state->g_Allocator, &surface);
     check_vk_result(err);
 
-    // Create Framebuffers
     int w, h;
     glfwGetFramebufferSize(state->window, &w, &h);
     ImGui_ImplVulkanH_Window* wd = &state->g_MainWindowData;
     setup_vulkan_window(state, surface, w, h);
 
-    // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
     ImGui_ImplGlfw_InitForVulkan(state->window, true);
     ImGui_ImplVulkan_InitInfo init_info = {};
-    //init_info.ApiVersion = VK_API_VERSION_1_3;              // Pass in your value of VkApplicationInfo::apiVersion, otherwise will default to header version.
     init_info.Instance = state->g_Instance;
     init_info.PhysicalDevice = state->g_PhysicalDevice;
     init_info.Device = state->g_Device;
@@ -855,7 +830,6 @@ bool Renderer::should_quit() { return glfwWindowShouldClose(state->window); }
 bool Renderer::before_frame() {        
     glfwPollEvents();
 
-    // Resize swap chain?
     int fb_width, fb_height;
     glfwGetFramebufferSize(state->window, &fb_width, &fb_height);
     if (fb_width > 0 && fb_height > 0 && (state->g_SwapChainRebuild || state->g_MainWindowData.Width != fb_width || state->g_MainWindowData.Height != fb_height))

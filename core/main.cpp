@@ -17,8 +17,6 @@
 #include <sys/types.h>
 #endif
 
-namespace {
-
 std::filesystem::path get_current_dir() {
 #ifdef _WIN32
     char exe_path[MAX_PATH] = {0};
@@ -156,8 +154,6 @@ bool launch_gui(const Flags& flags) {
     return true;
 #endif
 }
-
-} // namespace
 
 class Main {
     App app;

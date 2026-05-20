@@ -164,6 +164,7 @@ Token TokenBuffer::next_op() {
 
     if(op == "::") return Token(TokenKind::IDENTIFIER, op, loc);
     if(op == "[]") return Token(TokenKind::IDENTIFIER, op, loc);
+    if(op == "++") return Token(TokenKind::IDENTIFIER, op, loc);
     if(op == "+") return Token(TokenKind::IDENTIFIER, op, loc);
     if(op == "-") return Token(TokenKind::IDENTIFIER, op, loc);
     if(op == "*") return Token(TokenKind::IDENTIFIER, op, loc);

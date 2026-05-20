@@ -41,8 +41,6 @@ void Ui::draw_ui() {
     ImGui::NewFrame();
 
     draw_main_window(cmd_buf, state->main_window_state);
-    // static bool show = true;
-    // ImGui::ShowDemoWindow(&show);
     
     ImGui::Render();
 }
